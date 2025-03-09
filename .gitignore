@@ -1,0 +1,11 @@
+#Environment variables/API keys
+.env
+.env.*
+
+#Stores credentials for google cloud OAuth client (in this case chrome extentions)
+credentials.json
+token.json
+
+#ignore virtual environments
+venv/
+env/
