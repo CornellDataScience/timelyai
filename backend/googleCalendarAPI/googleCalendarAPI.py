@@ -500,6 +500,60 @@ class GoogleCalendar:
 
         return free_slots
 
+
+    def find_busy_slots(self, calendar_ids, search_date, start_hour=9, end_hour=17):
+        """
+        Find busy time slots in a day across multiple calendars.
+        Args:
+            calendar_ids: List of calendar IDs to check
+            search_date: Date to search for busy slots
+            start_hour: Beginning of workday hour (default 9)
+            end_hour: End of workday hour (default 17)
+        Returns:
+            List of tuples with start and end times for busy slots
+        """
+        local_tz = pytz.timezone(self.timezone)
+
+        # Create time range for the day
+        time_min = datetime.combine(search_date.date(), time(start_hour, 0)).replace(tzinfo=local_tz)
+        time_max = datetime.combine(search_date.date(), time(end_hour, 0)).replace(tzinfo=local_tz)
+
+        # Prepare API request
+        body = {
+            "timeMin": time_min.isoformat(),
+            "timeMax": time_max.isoformat(),
+            "items": [{"id": cal_id} for cal_id in calendar_ids]
+        }
+
+        # Get busy periods from Google Calendar API
+        free_busy_request = self.service.freebusy().query(body=body).execute()
+
+        # Collect and merge busy periods
+        all_busy_periods = []
+        for calendar_id, calendar_info in free_busy_request['calendars'].items():
+            for busy_period in calendar_info.get('busy', []):
+                start = datetime.fromisoformat(busy_period['start']).astimezone(local_tz)
+                end = datetime.fromisoformat(busy_period['end']).astimezone(local_tz)
+                all_busy_periods.append((start, end))
+
+        # Sort and merge overlapping periods
+        all_busy_periods.sort(key=lambda x: x[0])
+        merged_busy = []
+        for period in all_busy_periods:
+            if not merged_busy or period[0] > merged_busy[-1][1]:
+                merged_busy.append(period)
+            else:
+                merged_busy[-1] = (merged_busy[-1][0], max(merged_busy[-1][1], period[1]))
+
+        # Filter to remove periods outside our time range
+        filtered_busy = [
+            (max(start, time_min), min(end, time_max))
+            for start, end in merged_busy
+            if start < time_max and end > time_min
+        ]
+
+        return filtered_busy
+
     def get_monthly_event_summary(self, year, month, calendar_id=DEFAULT_CALENDAR_ID):
         """
         Get a summary of events for a specific month.
