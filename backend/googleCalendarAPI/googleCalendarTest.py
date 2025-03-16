@@ -79,7 +79,7 @@ def main():
 
     calendar_ids = [calendar["id"] for calendar in cal.list_calendars()]
     next_monday = today + datetime.timedelta(days=(7 - today.weekday()))
-    
+
     # print(f"\nFinding free slots for next Monday ({next_monday})...")
     # free_slots = cal.find_free_slots(
     #     calendar_ids=calendar_ids,
@@ -89,19 +89,25 @@ def main():
     #     duration_minutes=30
     # )
 
+    # busy_slots = cal.find_busy_slots(
+    #     calendar_ids=calendar_ids,
+    #     search_date=datetime.datetime.combine(next_monday, datetime.time(0, 0)),
+    #     start_hour=8,
+    #     end_hour=18
+    # )
+
+    # for start, end in busy_slots:
+    #     print(f"Busy from {start.strftime('%H:%M')} to {end.strftime('%H:%M')}")   
 
 
-    busy_slots = cal.find_busy_slots(
-        calendar_ids=calendar_ids,
-        search_date=datetime.datetime.combine(next_monday, datetime.time(0, 0)),
-        start_hour=8,
-        end_hour=18
-    )
+    events_df = cal.calendar_to_dataframe(calendar_ids)
 
-    for start, end in busy_slots:
-        print(f"Busy from {start.strftime('%H:%M')} to {end.strftime('%H:%M')}")    
-    
+    print(f"Found {len(events_df)} upcoming events")
+
+    events_df.to_csv('calendar.csv', index=False)
+        
     print("\nCalendar operations completed successfully!")
+    
 
 if __name__ == "__main__":
     main()

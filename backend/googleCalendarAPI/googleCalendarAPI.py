@@ -7,6 +7,11 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 import pytz
+import pandas as pd
+import pickle
+import os.path
+
+
 
 
 
@@ -500,7 +505,6 @@ class GoogleCalendar:
 
         return free_slots
 
-
     def find_busy_slots(self, calendar_ids, search_date, start_hour=9, end_hour=17):
         """
         Find busy time slots in a day across multiple calendars.
@@ -626,4 +630,152 @@ class GoogleCalendar:
             'categories': event_types
         }
 
-
+    def calendar_to_dataframe(self, calendar_ids, time_min=None, time_max=None, max_results=100):
+        """
+        Convert Google Calendar events to a pandas DataFrame with time distance from now.
+        
+        Args:
+            time_min: Datetime object for earliest time to include (default: now)
+            time_max: Datetime object for latest time to include (default: 30 days from now)
+            max_results: Maximum number of events to return per calendar (default: 100)
+            calendar_ids: String or list of calendar IDs to get events from (default: ["primary"])
+        
+        Returns:
+            pandas DataFrame with calendar events from all specified calendars
+        """
+        
+        # Handle calendar_ids parameter
+        if calendar_ids is None:
+            calendar_ids = ["primary"]
+        elif isinstance(calendar_ids, str):
+            calendar_ids = [calendar_ids]
+        
+        # Set default time ranges if not provided
+        now = datetime.now(self.tz)
+        if time_min is None:
+            time_min = now
+        if time_max is None:
+            time_max = now + timedelta(days=30)
+        
+        # Convert datetime objects to ISO format strings
+        time_min_str = time_min.isoformat()
+        time_max_str = time_max.isoformat()
+        
+        # Create empty list to collect events from all calendars
+        all_events = []
+        
+        # Process each calendar
+        for calendar_id in calendar_ids:
+            # Get events using existing service
+            events_result = self.service.events().list(
+                calendarId=calendar_id,
+                timeMin=time_min_str,
+                timeMax=time_max_str,
+                maxResults=max_results,
+                singleEvents=True,
+                orderBy="startTime"
+            ).execute()
+            
+            events = events_result.get('items', [])
+            
+            if events:
+                # Add calendar_id to each event for tracking source
+                for event in events:
+                    event['calendar_id'] = calendar_id
+                
+                all_events.extend(events)
+        
+        if not all_events:
+            print('No upcoming events found in any of the calendars.')
+            # Return empty DataFrame with expected columns
+            return pd.DataFrame(columns=[
+                'event_id', 'summary', 'description', 'location', 
+                'start_time', 'end_time', 'all_day', 'duration_minutes',
+                'time_until_event', 'days_until_event', 'hours_until_event',
+                'creator', 'attendees_count', 'status', 'created', 'updated',
+                'calendar_id', 'calendar_name'
+            ])
+        
+        # Get calendar names for better readability
+        calendar_names = {}
+        for calendar_id in calendar_ids:
+            try:
+                calendar_info = self.service.calendars().get(calendarId=calendar_id).execute()
+                calendar_names[calendar_id] = calendar_info.get('summary', calendar_id)
+            except Exception as e:
+                # If we can't get the name, just use the ID
+                calendar_names[calendar_id] = calendar_id
+        
+        # Process events to extract relevant information
+        event_data = []
+        
+        for event in all_events:
+            # Handle different start/end time formats (dateTime vs date for all-day events)
+            all_day = 'date' in event['start']
+            
+            if all_day:
+                # All-day event
+                start_time = datetime.fromisoformat(event['start']['date'])
+                start_time = self.tz.localize(start_time)
+                if 'end' in event and 'date' in event['end']:
+                    end_time = datetime.fromisoformat(event['end']['date'])
+                    end_time = self.tz.localize(end_time)
+                else:
+                    end_time = start_time + timedelta(days=1)
+            else:
+                # Timed event
+                start_time = datetime.fromisoformat(event['start']['dateTime'].replace('Z', '+00:00'))
+                end_time = datetime.fromisoformat(event['end']['dateTime'].replace('Z', '+00:00'))
+                
+                # Convert to local timezone if needed
+                if start_time.tzinfo != self.tz:
+                    start_time = start_time.astimezone(self.tz)
+                if end_time.tzinfo != self.tz:
+                    end_time = end_time.astimezone(self.tz)
+                    
+            # Calculate duration in minutes
+            duration = end_time - start_time
+            duration_minutes = duration.total_seconds() / 60
+            
+            # Calculate time until event
+            time_until_event = start_time - now
+            days_until_event = time_until_event.days
+            hours_until_event = time_until_event.total_seconds() / 3600
+            
+            # Get attendees count if available
+            attendees_count = len(event.get('attendees', [])) if 'attendees' in event else 0
+            
+            # Get the calendar ID and name
+            cal_id = event.get('calendar_id', 'primary')
+            cal_name = calendar_names.get(cal_id, cal_id)
+            
+            # Append data
+            event_data.append({
+                'event_id': event.get('id', ''),
+                'summary': event.get('summary', '(No title)'),
+                'description': event.get('description', ''),
+                'location': event.get('location', ''),
+                'start_time': start_time,
+                'end_time': end_time,
+                'all_day': all_day,
+                'duration_minutes': duration_minutes,
+                'time_until_event': time_until_event,
+                'days_until_event': days_until_event,
+                'hours_until_event': hours_until_event,
+                'creator': event.get('creator', {}).get('email', '') if 'creator' in event else '',
+                'attendees_count': attendees_count,
+                'status': event.get('status', ''),
+                'created': datetime.fromisoformat(event['created'].replace('Z', '+00:00')).astimezone(self.tz) if 'created' in event else None,
+                'updated': datetime.fromisoformat(event['updated'].replace('Z', '+00:00')).astimezone(self.tz) if 'updated' in event else None,
+                'calendar_id': cal_id,
+                'calendar_name': cal_name
+            })
+        
+        # Create DataFrame
+        df = pd.DataFrame(event_data)
+        
+        # Sort by start time
+        if not df.empty:
+            df = df.sort_values('start_time')
+        
+        return df
