@@ -106,7 +106,7 @@ def main():
 
     print(cal.get_user_email())
 
-    # events_df.to_csv('calendar.csv', index=False)
+    events_df.to_csv('calendar.csv', index=False)
         
     print("\nCalendar operations completed successfully!")
     
