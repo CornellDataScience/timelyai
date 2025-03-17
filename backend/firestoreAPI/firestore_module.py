@@ -4,7 +4,7 @@ from firebase_admin import credentials
 from datetime import datetime
 
 # Authenticate
-cred = credentials.Certificate("timelyai-35463-firebase-adminsdk-fbsvc-0c08638adb.json")
+cred = credentials.Certificate("firestore_credentials.json")
 app = firebase_admin.initialize_app(cred)
 
 # Initialize client
