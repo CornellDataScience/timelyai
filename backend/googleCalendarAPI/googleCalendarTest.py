@@ -104,7 +104,9 @@ def main():
 
     print(f"Found {len(events_df)} upcoming events")
 
-    events_df.to_csv('calendar.csv', index=False)
+    print(cal.get_user_email())
+
+    # events_df.to_csv('calendar.csv', index=False)
         
     print("\nCalendar operations completed successfully!")
     

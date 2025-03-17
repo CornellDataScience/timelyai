@@ -779,3 +779,13 @@ class GoogleCalendar:
             df = df.sort_values('start_time')
         
         return df
+    
+    def get_user_email(self):
+        calendar_list = self.service.calendarList().list().execute()
+        calendars = calendar_list.get('items', [])
+        
+        return calendars[0]["summary"]
+
+
+    # def update_database(self, fireBaseKey):
+
