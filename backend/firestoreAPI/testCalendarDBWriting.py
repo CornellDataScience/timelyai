@@ -1,9 +1,11 @@
+# TO BE DELETED #
+
 import pandas as pd
 import firebase_admin
 from firebase_admin import credentials
 from firebase_admin import firestore
 
-def load_df_to_firestore(db, df, collection_name, user_id):
+def load_df_to_firestore(db,df, collection_name, user_id):
     """
     Load data from a pandas DataFrame and write it to Firestore
     mapping all events to a single user ID
