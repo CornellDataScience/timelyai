@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TimelyAI</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+    <div class="container">
+        <h1 class="title">🕰️ TimelyAI</h1>
+
+        <!-- Todo List -->
+        <div class="section">
+            <h2>Todo List:</h2>
+            <ul id="taskList">
+                <!-- Sample tasks -->
+                <li>
+                    <strong>🐶 Walk the dog</strong>
+                    <span>Due: 3/8/25 | Duration: 1 hr | Category: Hobby</span>
+                </li>
+                <li>
+                    <strong>📚 Math HW</strong>
+                    <span>Due: 3/10/25 | Duration: 3 hrs | Category: School</span>
+                </li>
+                <li>
+                    <strong>💪 Work Out</strong>
+                    <span>Due: 3/8/25 | Duration: 1.5 hrs | Category: Hobby</span>
+                </li>
+            </ul>
+            <button id="showTaskForm">+ Add New Task</button>
+        
+        </div>
+
+        <!-- Schedule Event -->
+        <div class="section">
+            <h2>Schedule Event</h2>
+            <input type="text" id="eventTitle" placeholder="Title...">
+            <input type="date" id="eventDate">
+            <input type="time" id="eventTime">
+            <input type="text" id="eventLocation" placeholder="Enter the Location">
+            <button id="createEvent">+ Create Event</button>
+        </div>
+
+        <!-- Weekly Breakdown Pie Chart -->
+        <div class="section">
+            <div class="svg-pie-container">
+                <h2>Weekly Breakup:</h2>
+                <svg id="perfectPie" width="300" height="300" viewBox="0 0 300 300"></svg>
+                <div class="legend">
+                <div><span class="color-box school"></span> School</div>
+                <div><span class="color-box clubs"></span> Clubs</div>
+                <div><span class="color-box friends"></span> Friends</div>
+                <div><span class="color-box hobbies"></span> Hobbies</div>
+                <div><span class="color-box other"></span> Other</div>
+                </div>
+            </div>
+        </div>
+        
+    <!-- Add Task Modal -->
+    <div id="taskModal" class="modal">
+        <div class="modal-content">
+            <span class="close">&times;</span>
+            <h2>Add a New Task</h2>
+
+            <div class="modal-task-field">
+                <label for="taskTitle">Title:</label>
+                <input type="text" id="taskTitle" placeholder="Enter task title">
+                
+                <label for="taskDueDate">Due Date:</label>
+                <input type="date" id="taskDueDate">
+                
+                <label for="taskDuration">Duration:</label>
+                <input type="text" id="taskDuration" placeholder="e.g., 2 hours">
+                
+                <label for="taskCategory">Category:</label>
+                <select name="select-category" id="taskCategory">
+                    <option value="School">School</option>
+                    <option value="Clubs">Clubs</option>
+                    <option value="Friends">Friends</option>
+                    <option value="Hobbies">Hobbies</option>
+                    <option value="Other">Other</option>
+                </select>
+            </div>
+            
+            <button id="submitTask">Add Task</button>
+        </div>
+    </div>
+
+    <!-- leave console logs like this -->
+    <script src="popup.js"></script>
+    <script src="perfectPieChart.js"></script>
+</body>
+</html>
