@@ -5,7 +5,8 @@
 #Stores credentials for google cloud OAuth client (in this case chrome extentions)
 credentials.json
 token.json
+firestore_credentials.json
 
 #ignore virtual environments
 venv/
-env/backend/*.json
+env/
