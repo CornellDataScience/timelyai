@@ -786,15 +786,16 @@ class GoogleCalendar:
         
         return calendars[0]["summary"]
 
-    def get_available_time_today(self, calendar_ids=None, start_hour=START_TIME, end_hour=END_TIME):
+    def get_available_time_today(self, calendar_ids, start_hour=START_TIME, end_hour=END_TIME, min_duration_minutes=0):
         """
         Calculate the total available time during the current day across multiple calendars.
-        Only time slots that are free in ALL calendars are considered available.
+        Only time slots that are free in ALL calendars and meet the minimum duration are considered available.
         
         Args:
             calendar_ids: List of calendar IDs to check (default: ["primary"])
             start_hour: Beginning of workday hour (default: from global START_TIME)
             end_hour: End of workday hour (default: from global END_TIME)
+            min_duration_minutes: Minimum duration in minutes for a slot to be considered free (default: 0)
             
         Returns:
             Tuple containing (total_available_minutes, list_of_free_slots)
@@ -841,21 +842,29 @@ class GoogleCalendar:
                         new_free_slots.append((busy_end, free_end))
             free_slots = new_free_slots
         
-        # Calculate total free minutes
+        # Filter out slots that are too short
+        if min_duration_minutes > 0:
+            free_slots = [
+                (start, end) for start, end in free_slots 
+                if (end - start).total_seconds() / 60 >= min_duration_minutes
+            ]
+        
+        # Calculate total free minutes from the remaining slots
         total_free_minutes = sum((end - start).total_seconds() / 60 for start, end in free_slots)
         
         return total_free_minutes, free_slots
 
-    def get_available_time_three_days(self, calendar_ids=None, start_hour=START_TIME, end_hour=END_TIME):
+    def get_available_time_three_days(self, calendar_ids, start_hour=START_TIME, end_hour=END_TIME, min_duration_minutes=0):
         """
         Calculate the total available time over the current day and the next 2 days
         across multiple calendars. Only time slots that are free in ALL calendars
-        are considered available.
+        and meet the minimum duration are considered available.
         
         Args:
             calendar_ids: List of calendar IDs to check (default: ["primary"])
             start_hour: Beginning of workday hour (default: from global START_TIME)
             end_hour: End of workday hour (default: from global END_TIME)
+            min_duration_minutes: Minimum duration in minutes for a slot to be considered free (default: 0)
             
         Returns:
             Dictionary containing:
@@ -916,7 +925,14 @@ class GoogleCalendar:
                             new_free_slots.append((busy_end, free_end))
                 day_free_slots = new_free_slots
             
-            # Calculate total free minutes for this day
+            # Filter out slots that are too short
+            if min_duration_minutes > 0:
+                day_free_slots = [
+                    (start, end) for start, end in day_free_slots 
+                    if (end - start).total_seconds() / 60 >= min_duration_minutes
+                ]
+            
+            # Calculate total free minutes for this day from the filtered slots
             day_free_minutes = sum((end - start).total_seconds() / 60 for start, end in day_free_slots)
             
             # Update results
@@ -931,4 +947,3 @@ class GoogleCalendar:
         }
         
         return result
-

@@ -100,15 +100,17 @@ def main():
     #     print(f"Busy from {start.strftime('%H:%M')} to {end.strftime('%H:%M')}")   
 
 
-    events_df = cal.calendar_to_dataframe(calendar_ids)
+    # events_df = cal.calendar_to_dataframe(calendar_ids)
 
-    print(f"Found {len(events_df)} upcoming events")
+    print(cal.get_available_time_today(calendar_ids, min_duration_minutes=20))
 
-    print(cal.get_user_email())
+    # print(f"Found {len(events_df)} upcoming events")
 
-    events_df.to_csv('calendar.csv', index=False)
+    # print(cal.get_user_email())
+
+    # events_df.to_csv('calendar.csv', index=False)
         
-    print("\nCalendar operations completed successfully!")
+    # print("\nCalendar operations completed successfully!")
     
 
 if __name__ == "__main__":
