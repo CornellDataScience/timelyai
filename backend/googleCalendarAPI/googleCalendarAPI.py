@@ -786,6 +786,149 @@ class GoogleCalendar:
         
         return calendars[0]["summary"]
 
+    def get_available_time_today(self, calendar_ids=None, start_hour=START_TIME, end_hour=END_TIME):
+        """
+        Calculate the total available time during the current day across multiple calendars.
+        Only time slots that are free in ALL calendars are considered available.
+        
+        Args:
+            calendar_ids: List of calendar IDs to check (default: ["primary"])
+            start_hour: Beginning of workday hour (default: from global START_TIME)
+            end_hour: End of workday hour (default: from global END_TIME)
+            
+        Returns:
+            Tuple containing (total_available_minutes, list_of_free_slots)
+        """
+        # Default to primary calendar if none specified
+        if calendar_ids is None:
+            calendar_ids = [DEFAULT_CALENDAR_ID]
+        elif isinstance(calendar_ids, str):
+            calendar_ids = [calendar_ids]
+        
+        # Get today's date in the calendar's timezone
+        today = datetime.now(self.tz).date()
+        
+        # Create datetime objects for start and end of workday
+        day_start = self.tz.localize(datetime.combine(today, time(start_hour, 0)))
+        day_end = self.tz.localize(datetime.combine(today, time(end_hour, 0)))
+        
+        # Find busy slots across all calendars
+        busy_slots = self.find_busy_slots(calendar_ids, day_start, start_hour, end_hour)
+        
+        # Sort busy slots by start time
+        busy_slots.sort(key=lambda x: x[0])
+        
+        # Initialize free slots with the entire workday
+        free_slots = [(day_start, day_end)]
+        
+        # Remove busy time periods from free slots
+        for busy_start, busy_end in busy_slots:
+            new_free_slots = []
+            for free_start, free_end in free_slots:
+                # Case 1: Busy period is after this free slot - keep free slot unchanged
+                if busy_start >= free_end:
+                    new_free_slots.append((free_start, free_end))
+                # Case 2: Busy period is before this free slot - keep free slot unchanged
+                elif busy_end <= free_start:
+                    new_free_slots.append((free_start, free_end))
+                # Case 3: Busy period overlaps with free slot - split into up to two parts
+                else:
+                    # Add portion of free slot before busy period (if any)
+                    if free_start < busy_start:
+                        new_free_slots.append((free_start, busy_start))
+                    # Add portion of free slot after busy period (if any)
+                    if free_end > busy_end:
+                        new_free_slots.append((busy_end, free_end))
+            free_slots = new_free_slots
+        
+        # Calculate total free minutes
+        total_free_minutes = sum((end - start).total_seconds() / 60 for start, end in free_slots)
+        
+        return total_free_minutes, free_slots
 
-    # def update_database(self, fireBaseKey):
+    def get_available_time_three_days(self, calendar_ids=None, start_hour=START_TIME, end_hour=END_TIME):
+        """
+        Calculate the total available time over the current day and the next 2 days
+        across multiple calendars. Only time slots that are free in ALL calendars
+        are considered available.
+        
+        Args:
+            calendar_ids: List of calendar IDs to check (default: ["primary"])
+            start_hour: Beginning of workday hour (default: from global START_TIME)
+            end_hour: End of workday hour (default: from global END_TIME)
+            
+        Returns:
+            Dictionary containing:
+                - total_available_minutes: Sum of available minutes across all 3 days
+                - daily_breakdown: Dictionary with date strings as keys and available minutes as values
+                - free_slots: List of free time slots across all 3 days
+        """
+        # Default to primary calendar if none specified
+        if calendar_ids is None:
+            calendar_ids = [DEFAULT_CALENDAR_ID]
+        elif isinstance(calendar_ids, str):
+            calendar_ids = [calendar_ids]
+        
+        # Get today's date in the calendar's timezone
+        today = datetime.now(self.tz).date()
+        
+        # Initialize results
+        total_free_minutes = 0
+        daily_breakdown = {}
+        all_free_slots = []
+        
+        # Process each of the three days
+        for day_offset in range(3):
+            # Calculate the date we're analyzing
+            current_date = today + timedelta(days=day_offset)
+            date_str = current_date.strftime('%Y-%m-%d')
+            
+            # Create datetime objects for start and end of workday
+            day_start = self.tz.localize(datetime.combine(current_date, time(start_hour, 0)))
+            day_end = self.tz.localize(datetime.combine(current_date, time(end_hour, 0)))
+            
+            # Find busy slots for this day across all calendars
+            busy_slots = self.find_busy_slots(calendar_ids, day_start, start_hour, end_hour)
+            
+            # Sort busy slots by start time
+            busy_slots.sort(key=lambda x: x[0])
+            
+            # Initialize free slots with the entire workday
+            day_free_slots = [(day_start, day_end)]
+            
+            # Remove busy time periods from free slots
+            for busy_start, busy_end in busy_slots:
+                new_free_slots = []
+                for free_start, free_end in day_free_slots:
+                    # Case 1: Busy period is after this free slot - keep free slot unchanged
+                    if busy_start >= free_end:
+                        new_free_slots.append((free_start, free_end))
+                    # Case 2: Busy period is before this free slot - keep free slot unchanged
+                    elif busy_end <= free_start:
+                        new_free_slots.append((free_start, free_end))
+                    # Case 3: Busy period overlaps with free slot - split into up to two parts
+                    else:
+                        # Add portion of free slot before busy period (if any)
+                        if free_start < busy_start:
+                            new_free_slots.append((free_start, busy_start))
+                        # Add portion of free slot after busy period (if any)
+                        if free_end > busy_end:
+                            new_free_slots.append((busy_end, free_end))
+                day_free_slots = new_free_slots
+            
+            # Calculate total free minutes for this day
+            day_free_minutes = sum((end - start).total_seconds() / 60 for start, end in day_free_slots)
+            
+            # Update results
+            total_free_minutes += day_free_minutes
+            daily_breakdown[date_str] = day_free_minutes
+            all_free_slots.extend(day_free_slots)
+        
+        result = {
+            'total_available_minutes': total_free_minutes,
+            'daily_breakdown': daily_breakdown,
+            'free_slots': all_free_slots
+        }
+        
+        return result
 
