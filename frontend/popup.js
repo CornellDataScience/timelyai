@@ -72,6 +72,32 @@ document.addEventListener("DOMContentLoaded", function () {
             taskList.appendChild(li);
         }
 
+        // Send task to backend 
+        const taskDetails = {
+            title,
+            dueDate,
+            duration,
+            category
+        };
+        
+        fetch('http://localhost:4000/api/tasks', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                userId: "user123",
+                taskDetails: taskDetails
+            })
+        })
+        .then(res => res.json())
+        .then(data => {
+            console.log('✅ Task sent to backend:', data);
+        })
+        .catch(error => {
+            console.error('❌ Error sending task:', error);
+        });
+
         // Close the modal
         modal.style.display = "none";
 
