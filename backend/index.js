@@ -24,7 +24,7 @@ app.post('/api/tasks', async (req, res) => {
     console.log(`📝 Received new task for ${userId}:`, taskDetails);
     try {
         // Forward to Python backend
-        const response = await axios.post('http://localhost:5000/api/add-task', {
+        const response = await axios.post('http://localhost:8888/api/add-task', {
             userId,
             taskDetails
         });
@@ -37,10 +37,30 @@ app.post('/api/tasks', async (req, res) => {
 });
 
 // ✅ Deleting tasks (use a different route for deleting tasks)
-app.delete('/api/tasks', (req, res) => {
+app.delete('/api/tasks', async(req, res) => {
     const { userId, taskId } = req.body;  // Assuming you have taskId for deletion
     console.log(`📝 Deleting task for ${userId}:`, taskId);
     res.json({ status: 'success', message: 'Task Deleted' });
+});
+
+
+// ✅ Editing tasks (use a different route for deleting tasks)
+app.post('/api/tasks', (req, res) => {
+    const { userId, taskDetails, taskId } = req.body;  // Assuming you have taskId for deletion
+    console.log(`📝 Editing task for ${userId}:`, taskId);
+    res.json({ status: 'success', message: 'Task Deleted' });
+    try {
+        // Forward to Python backend
+        const response = await axios.post('http://localhost:8888/api/add-task', {
+            userId,
+            taskDetails
+        });
+        console.log("✅ Task forwarded to Python backend");
+        res.json(response.data);
+    } catch (error) {
+        console.error('❌ Error forwarding to Python:', error.message);
+        res.status(500).json({ status: 'error', message: 'Python backend failed' });
+    }
 });
 
 // Optional: health check

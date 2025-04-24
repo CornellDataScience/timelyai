@@ -57,6 +57,9 @@
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+from firestoreAPI import firestore_module as FB
+from datetime import datetime
+import json
 
 app = Flask(__name__)
 CORS(app)
@@ -67,9 +70,12 @@ def add_task():
     data = request.get_json()
     userId = data.get('userId')
     task = data.get('taskDetails')
-
+   
     print(f"✅ Task received from {userId}: {task}")
 
+    db = FB.initializeDB()
+    task_id = FB.addTask(db,userId,task["title"], task["duration"], task["category"],task["dueDate"])
+    print(f"✅ Task added to {userId}: {task_id}")
     # You can now do something with the task here, like:
     # - Save to DB
     # - Run your optimizer
@@ -77,5 +83,29 @@ def add_task():
 
     return jsonify({'status': 'success', 'message': 'Task processed', 'received': task})
 
+
+@app.route('/api/edit-task', methods=['POST'])
+def edit_task():
+    print("🚀 Incoming POST to /api/edit-task")
+    data = request.get_json()
+    userId = data.get('userId')
+    task = data.get('taskDetails')
+    taskId = data.get('taskId')
+   
+    print(f"✅ Task received from {userId}: {task}")
+
+    db = FB.initializeDB()
+    task_id = FB.updateTask(db,userId,taskId,task["title"], task["duration"], task["category"],task["dueDate"])
+    print(f"✅ Task added to {userId}: {task_id}")
+   
+    # You can now do something with the task here, like:
+    # - Save to DB
+    # - Run your optimizer
+    # - Respond with a suggested schedule
+
+    return jsonify({'status': 'success', 'message': 'Task processed', 'received': task})
+
+
+
 if __name__ == '__main__':
-    app.run(port=5000)
+    app.run(port=8888)

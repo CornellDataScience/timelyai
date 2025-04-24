@@ -111,7 +111,7 @@ def addTask(db, user_id, taskName, taskDuration, taskCategory, taskDeadline):
         task_id = db.collection("UserTasks").document().id # This generates a random ID
 
     
-    task_data = {"taskName": taskName, "taskDuration": taskDuration, "taskCategory":taskCategory, "taskDeadline": taskDeadline.strftime('%d/%m/%y %H:%M:%S')}
+    task_data = {"taskName": taskName, "taskDuration": taskDuration, "taskCategory":taskCategory, "taskDeadline": taskDeadline}
     #doc_ref.set({taskName: task_data})
     # Update the user document with the new task using the generated task_id
     doc_ref.update({
@@ -131,7 +131,8 @@ def updateTask(db, user_id, task_id, taskName, taskDuration, taskCategory, taskD
         "taskName": taskName,
         "taskDuration": taskDuration,
         "taskCategory": taskCategory,
-        "taskDeadline": taskDeadline.strftime('%d/%m/%y %H:%M:%S')
+        # "taskDeadline": taskDeadline.strftime('%ds/%m/%y %H:%M:%S')
+        "taskDeadline": taskDeadline
         }
     
     user_data = doc.to_dict()  # Convert document snapshot to dictionary
@@ -258,11 +259,11 @@ def TestRunUserPref():
 
 # TestRunUserPref()
 db = initializeDB()
-user_id = "TestALL2"
-taskID = "6VSfb3LDldhurSLE4cQl"
-deadline = datetime.strptime('31/01/22 23:59:59','%d/%m/%y %H:%M:%S')
-# loadUserTasks(db,user_id)
-# loadBaseUserPreferences(db,user_id)
-# addTask(db,user_id,"taskTwo",5,"Studying",deadline)
-# updateTask(db,user_id,taskID,"taskTwoEdited",5,"Editing",deadline)
-deleteTask(db,user_id,taskID)
+user_id = "TestMinhaj"
+# taskID = "6VSfb3LDldhurSLE4cQl"
+# deadline = datetime.strptime('31/01/22 23:59:59','%d/%m/%y %H:%M:%S')
+loadUserTasks(db,user_id)
+loadBaseUserPreferences(db,user_id)
+# # addTask(db,user_id,"taskTwo",5,"Studying",deadline)
+# # updateTask(db,user_id,taskID,"taskTwoEdited",5,"Editing",deadline)
+# deleteTask(db,user_id,taskID)
