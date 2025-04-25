@@ -1,0 +1,4 @@
+event_type,hours_until_due,daily_free_time,action_time,cost
+study,6,4.5,14.0,0.0
+relax,12,5.0,17.0,1.0
+gym,3,2.0,9.0,0.5

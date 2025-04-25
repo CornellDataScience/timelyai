@@ -1,0 +1,14 @@
+ca 0:[9.0,19.0]:14.0 | event_type:study duration:0.5 due_in_hrs:5 daily_free_time:
+ca 1:[9.0,19.0]:15.0 | event_type:study duration:0.75 hours_until_due:24 daily_free_time:6.0
+ca 0:[9.0,19.0]:16.3 | event_type=study duration:0.25 hours_until_due:72.0 daily_free_time:8.0
+ca 1:[9.0,20.0]:13.0 |event_type study task_duration:1.5 hours_until_due:6 daily_free_time:4.5
+ca 0:[9.0,20.0]:10.5 |event_type study task_duration:1.0 hours_until_due:4 daily_free_time:4.5
+ca 1:[9.0,20.0]:15.0 |event_type study task_duration:0.75 hours_until_due:24 daily_free_time:4.5
+ca 0:[9.0,20.0]:17.5 |event_type study task_duration:0.25 hours_until_due:48 daily_free_time:4.5
+ca 0:[9.0,20.0]:19.5 |event_type study task_duration:1.5 hours_until_due:48 daily_free_time:4.5
+ca 1:[9.0,20.0]:16.0 |event_type study task_duration:1.0 hours_until_due:48 daily_free_time:4.5
+ca 1:[9.0,20.0]:18.0 |event_type study task_duration:2.0 hours_until_due:48 daily_free_time:4.5
+ca 1:[9.0,20.0]:14.0 |event_type sleep task_duration:1.0 hours_until_due:999 daily_free_time:4.5
+ca 0:[9.0,20.0]:16.0 |event_type relax task_duration:0.5 hours_until_due:999 daily_free_time:5.5
+ca 0:[9.0,20.0]:1.0 |event_type sleep task_duration:6.0 hours_until_due:999 daily_free_time:7.0
+ca 0:[9.0,20.0]:10.0 |event_type sleep task_duration:8.0 hours_until_due:999 daily_free_time:3.0
