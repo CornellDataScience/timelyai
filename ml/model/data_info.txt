@@ -1,0 +1,209 @@
+# Time Recommendation System - Data Structure Documentation
+
+## Overview
+
+This document describes the data structure used by the time recommendation system, which employs contextual bandits to learn optimal time slots for different types of tasks. The system uses Vowpal Wabbit (VW) format for training and prediction.
+
+## Data Files
+
+The system uses the following data files:
+
+1. `train.vw` - Training data with feedback
+2. `test.vw` - Test data for predictions
+3. `feedback.vw` - New feedback data for model updates
+4. `predictions.txt` - Output file containing predictions
+5. `actions.txt` - File defining the action space (time slots)
+6. `time_recommendation.model` - Trained model file
+
+## VW Format
+
+The system uses Vowpal Wabbit's contextual bandits format:
+
+```
+action:cost:probability | features
+```
+
+For prediction examples (no feedback):
+```
+| features
+```
+
+## Feature Structure
+
+Each example includes the following features:
+
+1. `event_type` - Type of task (e.g., "hw", "meeting", "reading", "project")
+2. `category_X` - Category feature (e.g., "category_school", "category_social")
+3. `task_duration` - Expected duration in hours
+4. `hours_until_due` - Hours until the task is due
+5. `daily_free_time` - Available free time in the day
+6. `day_of_week` - Day of the week (0=Monday, 6=Sunday)
+7. `is_weekend` - Binary indicator if the day is a weekend (1) or weekday (0)
+8. `time_of_day` - Current time of day in 24-hour format with decimal hours
+
+## Event Categories
+
+The system now uses event categories from the backend app to improve recommendations. The categories are:
+
+1. `Clubs` - Club activities and extracurricular events
+   - Event types: club_meeting, club_activity, extracurricular
+   - Typical duration: 1.5 hours
+   - Typical urgency: medium
+   - Preferred times: afternoon
+
+2. `Health & Fitness` - Health and fitness related activities
+   - Event types: workout, exercise, meditation, yoga, gym
+   - Typical duration: 1.0 hour
+   - Typical urgency: low
+   - Preferred times: morning
+
+3. `Hobbies` - Personal hobbies and recreational activities
+   - Event types: hobby, craft, gaming, music, art
+   - Typical duration: 2.0 hours
+   - Typical urgency: low
+   - Preferred times: evening
+
+4. `Job` - Work-related activities
+   - Event types: work, job_task, work_meeting, work_project
+   - Typical duration: 2.0 hours
+   - Typical urgency: high
+   - Preferred times: morning
+
+5. `Other` - Miscellaneous activities
+   - Event types: other, misc, errand, appointment
+   - Typical duration: 1.0 hour
+   - Typical urgency: medium
+   - Preferred times: flexible
+
+6. `School` - Academic and educational activities
+   - Event types: hw, study, class, exam, project, reading
+   - Typical duration: 2.0 hours
+   - Typical urgency: high
+   - Preferred times: afternoon
+
+7. `Sleep` - Sleep and rest activities
+   - Event types: sleep, nap, rest, relax
+   - Typical duration: 8.0 hours
+   - Typical urgency: high
+   - Preferred times: night
+
+8. `Social` - Social activities and gatherings
+   - Event types: social, meeting, hangout, party, date
+   - Typical duration: 2.0 hours
+   - Typical urgency: medium
+   - Preferred times: evening
+
+## Action Space
+
+The action space consists of discrete time slots throughout the day:
+
+- Time range: 6:00 AM to 10:00 PM (6.0 to 22.0)
+- Time step: 30 minutes (0.5 hours)
+- Total actions: 33 time slots
+
+Each action is represented by an index (0-32) corresponding to a specific time slot.
+
+## Training Data Format
+
+Training examples include feedback on how well a recommendation worked:
+
+```
+action_index:cost:probability | event_type=hw task_duration=1.5 hours_until_due=24 daily_free_time=4.0 day_of_week=2 is_weekend=0 time_of_day=14.5 category_school=1
+```
+
+Where:
+- `action_index` - The index of the chosen time slot
+- `cost` - The cost/reward (lower is better, normalized to [0,1])
+- `probability` - The probability of the action (for importance sampling)
+- Features are in `name=value` format
+
+## Prediction Data Format
+
+Prediction examples omit the action, cost, and probability:
+
+```
+| event_type=hw task_duration=1.5 hours_until_due=24 daily_free_time=4.0 day_of_week=2 is_weekend=0 time_of_day=14.5 category_school=1
+```
+
+## Feedback Data Format
+
+Feedback data follows the same format as training data but is collected separately for incremental model updates:
+
+```
+action_index:cost:probability | event_type=hw task_duration=1.5 hours_until_due=24 daily_free_time=4.0 day_of_week=2 is_weekend=0 time_of_day=14.5 category_school=1
+```
+
+## Cost Calculation
+
+The system supports two types of feedback:
+
+### Continuous Feedback
+
+For continuous feedback (when the actual completion time is recorded):
+
+```
+cost = |chosen_time - actual_completion_time| / 24.0
+```
+
+This normalizes the cost to the [0,1] range, where:
+- 0.0 = Perfect recommendation (completed at exactly the recommended time)
+- 1.0 = Worst recommendation (completed 24 hours away from the recommended time)
+
+### Binary Feedback
+
+For binary feedback (accept/reject):
+
+```
+cost = 0.0 if accepted else 1.0
+```
+
+This creates a clear signal for the model to learn from:
+- 0.0 = Accepted recommendation
+- 1.0 = Rejected recommendation
+
+## Alternative Recommendations
+
+When a user rejects a recommendation, the system can provide an alternative time slot:
+
+1. The system tries to find a time slot that is different from the rejected one
+2. It considers the same constraints as the original recommendation (buffer time, day distribution)
+3. If no suitable alternative is found, it suggests a time that is at least 2 hours different from the rejected time
+4. As a last resort, it chooses the time slot with the lowest probability
+
+## Long Tasks
+
+For long tasks (duration > 3 hours), the system splits them into multiple sessions:
+
+1. Each session is treated as a separate example
+2. Sessions are distributed across available days
+3. The hours_until_due is adjusted for each session
+4. Feedback is recorded for each session separately
+
+## Example
+
+### Training Example with Continuous Feedback
+```
+5:0.25:0.8 | event_type=hw task_duration=1.5 hours_until_due=24 daily_free_time=4.0 day_of_week=2 is_weekend=0 time_of_day=14.5 category_school=1
+```
+This example indicates:
+- Action 5 (9:00 AM) was chosen
+- Cost was 0.25 (completed 6 hours away from recommended time)
+- Probability was 0.8
+- Task was homework, 1.5 hours long, due in 24 hours, with 4 hours of free time, on Wednesday
+
+### Training Example with Binary Feedback
+```
+5:0.0:0.8 | event_type=hw task_duration=1.5 hours_until_due=24 daily_free_time=4.0 day_of_week=2 is_weekend=0 time_of_day=14.5 category_school=1
+```
+This example indicates:
+- Action 5 (9:00 AM) was chosen
+- Cost was 0.0 (recommendation was accepted)
+- Probability was 0.8
+- Task was homework, 1.5 hours long, due in 24 hours, with 4 hours of free time, on Wednesday
+
+### Prediction Example
+```
+| event_type=meeting task_duration=1.0 hours_until_due=72 daily_free_time=4.0 day_of_week=3 is_weekend=0 time_of_day=15.0 category_social=1
+```
+This example requests a prediction for:
+- A meeting, 1 hour long, due in 72 hours, with 4 hours of free time, on Thursday 
