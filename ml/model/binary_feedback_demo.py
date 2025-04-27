@@ -3,15 +3,14 @@ import sys
 import numpy as np
 from datetime import datetime, timedelta
 from contextual_bandits import (
-    predict_best_time,
-    predict_best_times_for_long_task,
+    generate_recommendations,
     record_binary_feedback,
     update_model,
     reset_recommended_times,
-    add_class_schedule,
+    add_scheduled_event,
     add_blocked_time,
     clear_blocked_times,
-    clear_class_schedule,
+    clear_scheduled_events,
     format_day_and_time,
     format_duration,
 )
@@ -130,16 +129,16 @@ def main():
     # Reset recommended times
     reset_recommended_times()
 
-    # Clear any existing blocked times and class schedules
+    # Clear any existing blocked times and scheduled events
     clear_blocked_times()
-    clear_class_schedule()
+    clear_scheduled_events()
 
-    # Add some example class schedules
-    print("\n📚 Adding class schedules:")
-    add_class_schedule(0, 9.0, 10.5, "Math Class")  # Monday 9:00 AM - 10:30 AM
-    add_class_schedule(0, 11.0, 12.5, "Science Class")  # Monday 11:00 AM - 12:30 PM
-    add_class_schedule(2, 14.0, 15.5, "History Class")  # Wednesday 2:00 PM - 3:30 PM
-    add_class_schedule(4, 13.0, 14.5, "English Class")  # Friday 1:00 PM - 2:30 PM
+    # Add some example scheduled events
+    print("\n📅 Adding scheduled events:")
+    add_scheduled_event(0, 9.0, 10.5, "Math Class")  # Monday 9:00 AM - 10:30 AM
+    add_scheduled_event(0, 11.0, 12.5, "Science Class")  # Monday 11:00 AM - 12:30 PM
+    add_scheduled_event(2, 14.0, 15.5, "History Class")  # Wednesday 2:00 PM - 3:30 PM
+    add_scheduled_event(4, 13.0, 14.5, "English Class")  # Friday 1:00 PM - 2:30 PM
 
     # Add some other blocked times
     print("\n🕒 Adding other blocked times:")
@@ -149,9 +148,10 @@ def main():
     # Example 1: Short task (homework)
     print("\n📝 Example 1: Short task (homework)")
     print("----------------------------------")
-    day, time, duration = predict_best_time(
+    result = generate_recommendations(
         task_type="hw", task_duration=1.5, hours_until_due=48, daily_free_time=6.0
     )
+    day, time, duration = result
     print(f"Recommended time: {format_day_and_time(day, time, duration)}")
 
     # Simulate user feedback
@@ -172,9 +172,10 @@ def main():
     # If rejected, get an alternative recommendation
     if not was_accepted:
         print("\n🔄 Getting alternative recommendation...")
-        day, time, duration = predict_best_time(
+        result = generate_recommendations(
             task_type="hw", task_duration=1.5, hours_until_due=48, daily_free_time=6.0
         )
+        day, time, duration = result
         print(f"Alternative recommendation: {format_day_and_time(day, time, duration)}")
 
         # Simulate user feedback for the alternative
@@ -195,9 +196,10 @@ def main():
     # Example 2: Medium task (meeting)
     print("\n👥 Example 2: Medium task (meeting)")
     print("----------------------------------")
-    day, time, duration = predict_best_time(
+    result = generate_recommendations(
         task_type="meeting", task_duration=2.0, hours_until_due=72, daily_free_time=8.0
     )
+    day, time, duration = result
     print(f"Recommended time: {format_day_and_time(day, time, duration)}")
 
     # Simulate user feedback
@@ -215,10 +217,10 @@ def main():
         was_accepted=was_accepted,
     )
 
-    # Example 3a: Long task with splitting (project work)
-    print("\n💻 Example 3a: Long task with splitting (project work)")
+    # Example 3: Long task with splitting (project work)
+    print("\n💻 Example 3: Long task with splitting (project work)")
     print("--------------------------------------------------")
-    recommendations = predict_best_times_for_long_task(
+    recommendations = generate_recommendations(
         task_type="project",
         task_duration=6.0,
         hours_until_due=120,
@@ -249,35 +251,10 @@ def main():
             was_accepted=was_accepted,
         )
 
-    # Example 3b: Long task without splitting (project work)
-    print("\n💻 Example 3b: Long task without splitting (project work)")
-    print("----------------------------------------------------")
-    day, time, duration = predict_best_time(
-        task_type="project", task_duration=6.0, hours_until_due=120, daily_free_time=8.0
-    )
-    print(f"Recommended time: {format_day_and_time(day, time, duration)}")
-
-    # Simulate user feedback
-    was_accepted = simulate_user_preference(
-        "project", time, day, prefer_splitting=False
-    )
-    print(f"User {'accepted' if was_accepted else 'rejected'} the recommendation")
-
-    # Record feedback
-    record_binary_feedback(
-        task_type="project",
-        task_duration=6.0,
-        hours_until_due=120,
-        daily_free_time=8.0,
-        chosen_time=time,
-        day_of_week=day,
-        was_accepted=was_accepted,
-    )
-
-    # Example 4: Workout (considering class schedules)
-    print("\n💪 Example 4: Workout (considering class schedules)")
+    # Example 4: Workout (considering scheduled events)
+    print("\n💪 Example 4: Workout (considering scheduled events)")
     print("-----------------------------------------------")
-    day, time, duration = predict_best_time(
+    day, time, duration = generate_recommendations(
         task_type="workout", task_duration=1.0, hours_until_due=24, daily_free_time=4.0
     )
     print(f"Recommended time: {format_day_and_time(day, time, duration)}")
@@ -299,7 +276,12 @@ def main():
 
     # Update the model with all the feedback
     print("\n🔄 Updating model with feedback...")
-    update_model()
+    # Since we've already recorded all the feedback using record_binary_feedback,
+    # we don't need to pass additional examples to update_model
+    # The update_model function will process the feedback file that was created
+    update_model(
+        "", 0
+    )  # Pass empty example and zero cost as we've already recorded all feedback
 
     # Show how recommendations improve after feedback
     print("\n📊 Showing improved recommendations after feedback")
@@ -308,7 +290,7 @@ def main():
     # Example 5: Homework after feedback
     print("\n📝 Example 5: Homework after feedback")
     print("----------------------------------")
-    day, time, duration = predict_best_time(
+    day, time, duration = generate_recommendations(
         task_type="hw", task_duration=1.5, hours_until_due=48, daily_free_time=6.0
     )
     print(f"Recommended time: {format_day_and_time(day, time, duration)}")
@@ -316,7 +298,7 @@ def main():
     # Example 6: Meeting after feedback
     print("\n👥 Example 6: Meeting after feedback")
     print("----------------------------------")
-    day, time, duration = predict_best_time(
+    day, time, duration = generate_recommendations(
         task_type="meeting", task_duration=2.0, hours_until_due=72, daily_free_time=8.0
     )
     print(f"Recommended time: {format_day_and_time(day, time, duration)}")
@@ -324,7 +306,7 @@ def main():
     # Example 7: Project work after feedback (with splitting)
     print("\n💻 Example 7: Project work after feedback (with splitting)")
     print("--------------------------------------------------")
-    recommendations = predict_best_times_for_long_task(
+    recommendations = generate_recommendations(
         task_type="project",
         task_duration=6.0,
         hours_until_due=120,
@@ -339,7 +321,7 @@ def main():
     # Example 8: Workout after feedback
     print("\n💪 Example 8: Workout after feedback")
     print("-----------------------------------------------")
-    day, time, duration = predict_best_time(
+    day, time, duration = generate_recommendations(
         task_type="workout", task_duration=1.0, hours_until_due=24, daily_free_time=4.0
     )
     print(f"Recommended time: {format_day_and_time(day, time, duration)}")
