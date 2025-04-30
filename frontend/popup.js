@@ -83,17 +83,4 @@ document.addEventListener("DOMContentLoaded", function () {
 
     });
 
-    // Event Creation
-    document.getElementById("createEvent").addEventListener("click", function () {
-        let title = document.getElementById("eventTitle").value;
-        let date = document.getElementById("eventDate").value;
-        let time = document.getElementById("eventTime").value;
-        let location = document.getElementById("eventLocation").value;
-
-        if (title && date && time && location) {
-            alert(`Event Created: ${title} on ${date} at ${time} in ${location}`);
-        } else {
-            alert("Please fill out all fields!");
-        }
-    });
 });
