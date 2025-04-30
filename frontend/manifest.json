@@ -4,8 +4,13 @@
     "version": "1.0",
     "manifest_version": 3,
     "action": {
-        "default_popup": "index.html",
+        "default_popup": "login.html",
         "default_icon": "images/clock.png"
     },
-    "permissions": ["storage"]
+    "permissions": ["identity", "storage"],
+    "oauth2": {
+    "client_id": "YOUR_OAUTH_CLIENT_ID.apps.googleusercontent.com",
+    "scopes": ["email"]
+}
+
 }

@@ -45,7 +45,7 @@ app.delete('/api/tasks', async(req, res) => {
 
 
 // ✅ Editing tasks (use a different route for deleting tasks)
-app.post('/api/tasks', (req, res) => {
+app.post('/api/tasks', async(req, res) => {
     const { userId, taskDetails, taskId } = req.body;  // Assuming you have taskId for deletion
     console.log(`📝 Editing task for ${userId}:`, taskId);
     res.json({ status: 'success', message: 'Task Deleted' });

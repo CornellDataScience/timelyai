@@ -64,9 +64,10 @@ import json
 app = Flask(__name__)
 CORS(app)
 
-@app.route('/api/add-task', methods=['POST'])
+
+@app.route('/api/tasks', methods=['POST'])
 def add_task():
-    print("🚀 Incoming POST to /api/add-task")
+    print("🚀 Incoming POST to /api/tasks")
     data = request.get_json()
     userId = data.get('userId')
     task = data.get('taskDetails')
@@ -84,27 +85,50 @@ def add_task():
     return jsonify({'status': 'success', 'message': 'Task processed', 'received': task})
 
 
-@app.route('/api/edit-task', methods=['POST'])
-def edit_task():
-    print("🚀 Incoming POST to /api/edit-task")
-    data = request.get_json()
-    userId = data.get('userId')
-    task = data.get('taskDetails')
-    taskId = data.get('taskId')
+# @app.route('/api/tasks', methods=['POST'])
+# def edit_task():
+#     print("🚀 Incoming POST to /api/edit-task")
+#     data = request.get_json()
+#     userId = data.get('userId')
+#     task = data.get('taskDetails')
+#     taskId = data.get('taskId')
    
-    print(f"✅ Task received from {userId}: {task}")
+#     print(f"✅ Task received from {userId}: {task}")
 
+#     db = FB.initializeDB()
+#     task_id = FB.updateTask(db,userId,taskId,task["title"], task["duration"], task["category"],task["dueDate"])
+#     print(f"✅ Task added to {userId}: {task_id}")
+   
+#     # You can now do something with the task here, like:
+#     # - Save to DB
+#     # - Run your optimizer
+#     # - Respond with a suggested schedule
+
+#     return jsonify({'status': 'success', 'message': 'Task processed', 'received': task})
+
+@app.route('/api/tasks', methods=['GET'])
+def get_tasks():
+    user_id = request.args.get("userId")
     db = FB.initializeDB()
-    task_id = FB.updateTask(db,userId,taskId,task["title"], task["duration"], task["category"],task["dueDate"])
-    print(f"✅ Task added to {userId}: {task_id}")
-   
-    # You can now do something with the task here, like:
-    # - Save to DB
-    # - Run your optimizer
-    # - Respond with a suggested schedule
+    doc_ref = db.collection("UserTasks").document(user_id)
+    doc = doc_ref.get()
 
-    return jsonify({'status': 'success', 'message': 'Task processed', 'received': task})
+    if not doc.exists:
+        return jsonify([])
 
+    tasks_map = doc.to_dict().get("tasks", {})
+    tasks = []
+
+    for task_id, task_data in tasks_map.items():
+        tasks.append({
+            "id": task_id,
+            "title": task_data.get("taskName", "Untitled"),
+            "dueDate": task_data.get("taskDeadline", "TBD"),
+            "duration": task_data.get("taskDuration", "TBD"),
+            "category": task_data.get("taskCategory", "None")
+        })
+
+    return jsonify(tasks)
 
 
 if __name__ == '__main__':
