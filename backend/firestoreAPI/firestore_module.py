@@ -4,8 +4,12 @@ from firebase_admin import credentials
 from datetime import datetime
 import pandas as pd
 import os
+<<<<<<< HEAD
+#import datetime
+=======
 
 # import datetime
+>>>>>>> 6a6ad42bcc2998ce27179dfd3e20132ece223740
 
 """
 TimelyAI Firestore Integration Module
@@ -14,7 +18,10 @@ This module provides functions to interact with Firestore for the TimelyAI proje
 handling user preferences, goals, tasks, and schedule management.
 """
 
+<<<<<<< HEAD
+=======
 
+>>>>>>> 6a6ad42bcc2998ce27179dfd3e20132ece223740
 def initializeDB():
     if not firebase_admin._apps:
         cred = credentials.Certificate(
@@ -36,7 +43,11 @@ def loadBaseUserPreferences(db, user_id):
     Initialize a new user document in Firestore with default values.
     """
     doc_ref = db.collection("UserPreferences").document(user_id)
+<<<<<<< HEAD
+    
+=======
 
+>>>>>>> 6a6ad42bcc2998ce27179dfd3e20132ece223740
     goals = {
         "Exercise": {"Run": 0, "Gym": 0},
         "Socialize": 0,
@@ -47,8 +58,13 @@ def loadBaseUserPreferences(db, user_id):
     }
     sleep_schedule = {"wakeTime": "08:00 AM", "bedTime": "11:00 PM"}
     data = {
+<<<<<<< HEAD
+        "goals" : goals,
+        "sleep_schedule" : sleep_schedule,
+=======
         "goals": goals,
         "sleep_schedule": sleep_schedule,
+>>>>>>> 6a6ad42bcc2998ce27179dfd3e20132ece223740
     }
 
     doc_ref.set(data)
@@ -129,10 +145,36 @@ def addTask(db, user_id, taskName, taskDuration, taskCategory, taskDeadline):
             print("Task ID already exists, generating another.")
         task_id = db.collection("UserTasks").document().id  # This generates a random ID
 
+<<<<<<< HEAD
+    
+    task_data = {"taskName": taskName, "taskDuration": taskDuration, "taskCategory":taskCategory, "taskDeadline": taskDeadline}
+    #doc_ref.set({taskName: task_data})
+    # Update the user document with the new task using the generated task_id
+    doc_ref.update({
+        f"tasks.{task_id}": task_data
+    })
+    return task_id
+
+def updateTask(db, user_id, task_id, taskName, taskDuration, taskCategory, taskDeadline):
+    """Modify an existing task."""
+
+    doc_ref = db.collection("UserTasks").document(user_id)
+    doc = doc_ref.get()
+    if not doc.exists:
+        return False
+    
+=======
+>>>>>>> 6a6ad42bcc2998ce27179dfd3e20132ece223740
     task_data = {
         "taskName": taskName,
         "taskDuration": taskDuration,
         "taskCategory": taskCategory,
+<<<<<<< HEAD
+        # "taskDeadline": taskDeadline.strftime('%ds/%m/%y %H:%M:%S')
+        "taskDeadline": taskDeadline
+        }
+    
+=======
         "taskDeadline": taskDeadline.strftime("%d/%m/%y %H:%M:%S"),
     }
     # doc_ref.set({taskName: task_data})
@@ -158,6 +200,7 @@ def updateTask(
         "taskDeadline": taskDeadline.strftime("%d/%m/%y %H:%M:%S"),
     }
 
+>>>>>>> 6a6ad42bcc2998ce27179dfd3e20132ece223740
     user_data = doc.to_dict()  # Convert document snapshot to dictionary
     existing_tasks = user_data.get(
         "tasks", {}
@@ -221,7 +264,11 @@ def updateGoals(db, user_id, goal_category, goal_name, duration):
         goals[goal_category][goal_name] = duration
     else:
         goals[goal_category] = {goal_name: duration}
+<<<<<<< HEAD
+    
+=======
 
+>>>>>>> 6a6ad42bcc2998ce27179dfd3e20132ece223740
     updateUserField(user_id, "UserPreferences.goals", goals)
     return True
 
@@ -286,6 +333,16 @@ def TestRunUserPref():
 
 # TestRunUserPref()
 db = initializeDB()
+<<<<<<< HEAD
+user_id = "TestMinhaj"
+# taskID = "6VSfb3LDldhurSLE4cQl"
+# deadline = datetime.strptime('31/01/22 23:59:59','%d/%m/%y %H:%M:%S')
+loadUserTasks(db,user_id)
+loadBaseUserPreferences(db,user_id)
+# # addTask(db,user_id,"taskTwo",5,"Studying",deadline)
+# # updateTask(db,user_id,taskID,"taskTwoEdited",5,"Editing",deadline)
+# deleteTask(db,user_id,taskID)
+=======
 user_id = "TestALL2"
 taskID = "6VSfb3LDldhurSLE4cQl"
 deadline = datetime.strptime("31/01/22 23:59:59", "%d/%m/%y %H:%M:%S")
@@ -294,3 +351,4 @@ deadline = datetime.strptime("31/01/22 23:59:59", "%d/%m/%y %H:%M:%S")
 # addTask(db,user_id,"taskTwo",5,"Studying",deadline)
 # updateTask(db,user_id,taskID,"taskTwoEdited",5,"Editing",deadline)
 deleteTask(db, user_id, taskID)
+>>>>>>> 6a6ad42bcc2998ce27179dfd3e20132ece223740
