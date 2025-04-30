@@ -1,0 +1,15 @@
+0:0.2:9 |event_type hw task_duration:1.0 hours_until_due:4 daily_free_time:4.5 day_of_week:2 is_weekend:0 time_of_day:9.5
+1:0.4:14 |event_type sleep task_duration:1.0 hours_until_due:999 daily_free_time:4.5 day_of_week:2 is_weekend:0 time_of_day:9.5
+2:0.1:6 |event_type meeting task_duration:0.5 hours_until_due:2 daily_free_time:6.0 day_of_week:1 is_weekend:0 time_of_day:8.5
+3:0.5:21 |event_type reading task_duration:1.5 hours_until_due:48 daily_free_time:5.0 day_of_week:3 is_weekend:0 time_of_day:10.0
+4:0.2:10 |event_type hw task_duration:2.0 hours_until_due:24 daily_free_time:3.0 day_of_week:4 is_weekend:0 time_of_day:9.0
+5:0.3:15 |event_type relax task_duration:0.5 hours_until_due:999 daily_free_time:4.0 day_of_week:5 is_weekend:0 time_of_day:12.0
+6:0.2:8 |event_type hw task_duration:1.0 hours_until_due:12 daily_free_time:5.5 day_of_week:6 is_weekend:1 time_of_day:8.0
+7:0.3:18 |event_type meeting task_duration:1.0 hours_until_due:6 daily_free_time:4.0 day_of_week:0 is_weekend:0 time_of_day:14.0
+8:0.5:23 |event_type reading task_duration:1.0 hours_until_due:72 daily_free_time:6.0 day_of_week:2 is_weekend:0 time_of_day:16.0
+9:0.3:12 |event_type hw task_duration:2.5 hours_until_due:36 daily_free_time:3.5 day_of_week:3 is_weekend:0 time_of_day:10.5
+10:0.1:4 |event_type sleep task_duration:1.0 hours_until_due:999 daily_free_time:5.0 day_of_week:7 is_weekend:1 time_of_day:7.0
+11:0.5:24 |event_type relax task_duration:1.0 hours_until_due:999 daily_free_time:4.5 day_of_week:1 is_weekend:0 time_of_day:17.0
+12:0.2:7 |event_type meeting task_duration:0.5 hours_until_due:3 daily_free_time:5.5 day_of_week:4 is_weekend:0 time_of_day:9.0
+13:0.4:20 |event_type hw task_duration:1.5 hours_until_due:18 daily_free_time:4.0 day_of_week:5 is_weekend:0 time_of_day:14.5
+14:0.3:11 |event_type reading task_duration:1.0 hours_until_due:60 daily_free_time:5.0 day_of_week:6 is_weekend:1 time_of_day:10.0
