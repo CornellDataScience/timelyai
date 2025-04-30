@@ -31,6 +31,13 @@ body {
     font-weight: bold;
 }
 
+.timely-ai-container {
+  display: flex;
+  justify-content: center;
+  height: 100vh; /* fill full screen height */
+  background-color: #f9f9f9; /* light gray bg */
+}
+
 /* Sections */
 .section {
     background: white;
@@ -263,3 +270,103 @@ button {
 button:hover {
     background-color: #3c9641
 }
+
+/* Style the tab */
+.tab {
+    display: flex;
+    flex-direction: row;
+  }
+  
+  /* Style the buttons that are used to open the tab content */
+  .tab button {
+    background-color:#ffffff;
+    color: black;
+    float: left;
+    border: none;
+    outline: none;
+    cursor: pointer;
+    padding: 14px 16px;
+    transition: 0.3s;
+    border-radius: 0;
+    box-shadow: 0px 2px 5px rgba(0, 0, 0, 0.1);
+  }
+  
+  /* Change background color of buttons on hover */
+  .tab button:hover {
+    background-color: #ddd;
+  }
+  
+  /* Create an active/current tablink class */
+  .tab button.active {
+    color: rgb(255, 255, 255);
+    background-color: #3CAE63;
+  }
+  
+  /* Style the tab content */
+  .tabcontent {
+    display: none;
+    padding: 6px 12px;
+    border: 1px solid #ccc;
+    border-top: none;
+  }
+  
+  .top-row-todo-item {
+    display: flex;
+    flex-direction: row;
+    align-items: center; /* Keep center vertically */
+    justify-content: space-between;
+    width: 100%;
+  }
+  
+
+.todo-item-title {
+  display: flex;
+  align-items: center;
+  flex-grow: 1;
+  font-size: 16px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.todo-item-title strong {
+  display: block; 
+}
+
+.todo-item-buttons {
+  display: flex;
+  flex-direction: row;
+  gap: 6px;
+  align-items: center; /* Center inside the button group too */
+}
+
+.todo-item-buttons button {
+  font-size: 10px;
+  background-color: #3CAE63;
+  color: white;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  padding: 2px 4px;
+  margin-bottom: 10px;
+}
+
+.todo-item-title {
+  display: flex;
+  align-items: center; /* Center the strong text inside title too */
+  flex-grow: 1;
+  font-size: 16px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.divider {
+  background-color: rgb(224, 224, 224);
+  margin-top: 10px;
+  width: 100%;
+  height: 1px;
+}
+  
+  
+  
