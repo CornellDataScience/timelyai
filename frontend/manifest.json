@@ -11,5 +11,11 @@
         "identity",
         "identity.email",
         "storage"
-    ]
+    ],
+    "oauth2": {
+        "client_id": "426831985998-gdrvv8k4eide55mcbn591a70mqtsqhhi.apps.googleusercontent.com",
+        "scopes": [
+            "https://www.googleapis.com/auth/userinfo.email"
+        ]
+    }
 }

@@ -2,20 +2,20 @@ import datetime
 from googleCalendarAPI import GoogleCalendar
 import os
 
+
 def main():
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
     project_root = os.path.dirname(os.path.dirname(script_dir))
-    
+
     # Define paths relative to the project root
     token_path = os.path.join(project_root, "token.json")
-    credentials_path = os.path.join(project_root, "credentials.json")
-
+    credentials_path = os.path.join(project_root, "user_credentials.json")
 
     # Initialize the calendar
     cal = GoogleCalendar(credentials_path, token_path)
     print("Google Calendar initialized\n")
-    
+
     # Get today's date and time for examples
     now = datetime.datetime.now()
     today = now.date()
@@ -24,7 +24,7 @@ def main():
     # meeting_start = now.replace(hour=14, minute=0, second=0, microsecond=0) + datetime.timedelta(days=1)
     # meeting_end = meeting_start + datetime.timedelta(hours=1)
     # meeting_reminder = {"useDefault": False, "overrides": [{"method": "popup", "minutes": 15}]}
-    
+
     # print("Creating a team meeting for tomorrow...")
     # meeting = cal.create_event(
     #     summary="Team Sprint Planning",
@@ -37,12 +37,12 @@ def main():
     #         {"email": "colleague2@example.com"}
     #     ],
     #     reminders=meeting_reminder,
-    #     with_conference=False 
+    #     with_conference=False
     # )
-    
+
     # # Example 2: Create an all-day event
     # allday_start = today + datetime.timedelta(days=5)
-    
+
     # allday_event = cal.create_event(
     #     summary="Company Offsite",
     #     description="Annual team building event",
@@ -52,11 +52,11 @@ def main():
     #     additional_days=1,  # Make it a 2-day event
     #     color_id="11"  # Use a different color (red)
     # )
-    
+
     # # Example 3: Create a deadline with early reminder
     # deadline_date = now.replace(hour=17, minute=0, second=0, microsecond=0) + datetime.timedelta(days=7)
     # deadline_reminder = {"useDefault": False, "overrides": [{"method": "popup", "minutes": 1440}]}  # 24 hours
-    
+
     # print("\nCreating a project deadline...")
     # deadline = cal.create_event(
     #     summary="Project Milestone Deadline",
@@ -66,15 +66,15 @@ def main():
     #     reminders=deadline_reminder,
     #     color_id="4"  # Use a different color (purple)
     # )
-    
+
     # # Example 4: List upcoming events
     # print("\nListing your upcoming events...")
     # upcoming_events = cal.list_upcoming_events(max_results=5)
-    
+
     # # Example 5: Search for events
     # print("\nSearching for team meetings...")
     # team_meetings = cal.search_events(query="Team", max_results=3)
-    
+
     # Example 6: Find free slots
 
     calendar_ids = [calendar["id"] for calendar in cal.list_calendars()]
@@ -97,8 +97,7 @@ def main():
     # )
 
     # for start, end in busy_slots:
-    #     print(f"Busy from {start.strftime('%H:%M')} to {end.strftime('%H:%M')}")   
-
+    #     print(f"Busy from {start.strftime('%H:%M')} to {end.strftime('%H:%M')}")
 
     events_df = cal.calendar_to_dataframe(calendar_ids)
 
@@ -106,10 +105,10 @@ def main():
 
     print(cal.get_user_email())
 
-    events_df.to_csv('calendar.csv', index=False)
-        
+    events_df.to_csv("calendar.csv", index=False)
+
     print("\nCalendar operations completed successfully!")
-    
+
 
 if __name__ == "__main__":
     main()

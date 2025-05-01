@@ -1,41 +1,24 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from firestoreAPI import firestore_module as FB
-from datetime import datetime, timedelta
+from datetime import datetime
 import json
+from flask import request, jsonify
+from googleCalendarAPI.googleCalendarAPI import GoogleCalendar  # ← your helper class
+from datetime import datetime, timedelta
+import pytz
 import os
-from timelyai.backend.googleCalendarAPI.googleCalendarAPI import (
-    GoogleCalendar,
-    DEFAULT_COLOR_ID,
-)
-from timelyai.backend.model_manager import ModelManager
 
-# from timelyai.ml.model.contextual_bandits import (
-#     generate_recommendations as baseline_recommendations,
-#     record_binary_feedback,
-#     train_model,
-#     update_model,
-#     reset_recommended_times,
-#     add_blocked_time,
-#     clear_blocked_times,
-#     clear_scheduled_events,
-#     add_scheduled_event,
-# )
+script_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(os.path.dirname(script_dir))
+TOKEN_DIR = os.path.join(project_root, "timelyai/token.json")  # one JSON per user
+CREDS_JSON = os.path.join(
+    project_root, "timelyai/user_credentials.json"
+)  # OAuth client-secret
+
 
 app = Flask(__name__)
 CORS(app)
-
-# Initialize Google Calendar with credentials
-script_dir = os.path.dirname(os.path.abspath(__file__))
-project_root = os.path.dirname(os.path.dirname(script_dir))
-
-# Define paths relative to the project root
-token_path = os.path.join(project_root, "token.json")
-credentials_path = os.path.join(project_root, "credentials.json")
-
-# Initialize calendar and model manager
-calendar = GoogleCalendar(credentials_path, token_path)
-model_manager = ModelManager()
 
 
 @app.route("/api/tasks", methods=["POST"])
@@ -58,6 +41,28 @@ def add_task():
     # - Respond with a suggested schedule
 
     return jsonify({"status": "success", "message": "Task processed", "received": task})
+
+
+# @app.route('/api/tasks', methods=['POST'])
+# def edit_task():
+#     print("🚀 Incoming POST to /api/edit-task")
+#     data = request.get_json()
+#     userId = data.get('userId')
+#     task = data.get('taskDetails')
+#     taskId = data.get('taskId')
+
+#     print(f"✅ Task received from {userId}: {task}")
+
+#     db = FB.initializeDB()
+#     task_id = FB.updateTask(db,userId,taskId,task["title"], task["duration"], task["category"],task["dueDate"])
+#     print(f"✅ Task added to {userId}: {task_id}")
+
+#     # You can now do something with the task here, like:
+#     # - Save to DB
+#     # - Run your optimizer
+#     # - Respond with a suggested schedule
+
+#     return jsonify({'status': 'success', 'message': 'Task processed', 'received': task})
 
 
 @app.route("/api/tasks", methods=["GET"])
@@ -133,147 +138,86 @@ def load_goals():
         return jsonify({"status": "error", "message": str(e)}), 500
 
 
+# @app.route("/api/generate-recs", methods=["POST"])
+# def generate_recommendations():
+#     print("🚀 Incoming POST to /api/generate-recs")
+#     data = request.get_json()
+#     user_id = data.get("userId")
+
+#     if not user_id:
+#         return jsonify({"status": "error", "message": "Missing userId"}), 400
+
+#     try:
+#         # TODO: Replace with real model call or logic
+#         fake_recommendations = [
+#             "📚 Study 2 hours tonight for CS exam",
+#             "🎨 Spend 1 hour on hobbies this weekend",
+#             "💬 Call a friend on Friday",
+#         ]
+#         print(f"✅ Generated recommendations for {user_id}")
+#         return jsonify({"status": "success", "recommendations": fake_recommendations})
+#     except Exception as e:
+#         print(f"❌ Error generating recommendations: {e}")
+#         return jsonify({"status": "error", "message": str(e)}), 500
+
+
 @app.route("/api/generate-recs", methods=["POST"])
 def generate_recommendations():
     print("🚀 Incoming POST to /api/generate-recs")
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
     user_id = data.get("userId")
 
     if not user_id:
         return jsonify({"status": "error", "message": "Missing userId"}), 400
 
-    try:
-        # Get user's tasks and preferences
-        db = FB.initializeDB()
-        tasks_doc = db.collection("UserTasks").document(user_id).get()
-        prefs_doc = db.collection("UserPreferences").document(user_id).get()
+    # ---------------------------------------------------------------------
+    # 1.  Build / fetch recommendations  (replace with real ML later)
+    # ---------------------------------------------------------------------
+    fake_recommendations = [
+        {
+            "summary": "📚 Study 2 h for CS exam",
+            "start_in": 2,
+            "duration_h": 2,
+        },  # start in N hours
+        {"summary": "🎨 Work on hobbies", "start_in": 26, "duration_h": 1},
+        {"summary": "💬 Call a friend", "start_in": 50, "duration_h": 0.5},
+    ]
 
-        if not tasks_doc.exists or not prefs_doc.exists:
-            return jsonify({"status": "error", "message": "User data not found"}), 404
+    # ---------------------------------------------------------------------
+    # 2.  Connect to Google Calendar as *this* user
+    # ---------------------------------------------------------------------
+    # token_path = os.path.join(TOKEN_DIR, f"{user_id}.json")
+    gcal = GoogleCalendar(credentials_path=CREDS_JSON, token_path=TOKEN_DIR)
 
-        tasks = tasks_doc.to_dict().get("tasks", {})
-        preferences = prefs_doc.to_dict().get("Goals", {})
+    # ---------------------------------------------------------------------
+    # 3.  Create calendar events
+    # ---------------------------------------------------------------------
+    tz = pytz.timezone("America/New_York")  # adjust as you like
+    event_urls = []
 
-        # Get user's busy times
-        busy_times = calendar.find_busy_slots(
-            [calendar.get_user_email()], datetime.now()
-        )
+    for rec in fake_recommendations:
+        start_dt = datetime.now(tz) + timedelta(hours=rec["start_in"])
+        end_dt = start_dt + timedelta(hours=rec["duration_h"])
 
-        # Generate recommendations using user's specific model
-        recommendations = model_manager.get_recommendations(
-            user_id, tasks, preferences, busy_times
-        )
-
-        # Convert recommendations to calendar events
-        events = []
-        for rec in recommendations:
-            event = calendar.create_event(
-                summary=rec["title"],
-                description=rec["description"],
-                start_time=rec["start_time"],
-                end_time=rec["end_time"],
-                color_id=rec.get("color_id", DEFAULT_COLOR_ID),
+        try:
+            event = gcal.create_event(
+                summary=rec["summary"],
+                description=rec["summary"],  # ← quick placeholder
+                start_time=start_dt,
+                end_time=end_dt,
             )
-            events.append(event)
+            event_urls.append(event.get("htmlLink"))
+            print(f"✅ Created event «{rec['summary']}»")
+        except Exception as e:
+            print(f"❌ Failed to create event «{rec['summary']}»: {e}")
 
-        print(f"✅ Generated and scheduled {len(events)} recommendations for {user_id}")
-        return jsonify(
-            {
-                "status": "success",
-                "events": events,
-                "message": f"Successfully scheduled {len(events)} events",
-            }
-        )
-    except Exception as e:
-        print(f"❌ Error generating recommendations: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-
-@app.route("/api/calendar/webhook", methods=["POST"])
-def handle_calendar_webhook():
-    print("🚀 Incoming webhook from Google Calendar")
-    try:
-        # Get the notification data from Google Calendar
-        data = request.get_json()
-        event_id = data.get("id")
-        user_id = data.get(
-            "userId"
-        )  # This would need to be mapped from the calendar email
-        status = data.get("status")  # "accepted", "declined", "tentative"
-
-        if not all([event_id, user_id, status]):
-            return (
-                jsonify({"status": "error", "message": "Missing required fields"}),
-                400,
-            )
-
-        # Update user's model with feedback
-        model_manager.update_with_feedback(user_id, event_id, status)
-
-        print(
-            f"✅ Processed calendar webhook for event {event_id} with status {status}"
-        )
-        return jsonify({"status": "success", "message": "Webhook processed"})
-    except Exception as e:
-        print(f"❌ Error processing calendar webhook: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-
-@app.route("/api/tasks/<task_id>", methods=["PUT"])
-def edit_task(task_id):
-    print(f"🚀 Incoming PUT to /api/tasks/{task_id}")
-    data = request.get_json()
-    user_id = data.get("userId")
-    task = data.get("taskDetails")
-
-    if not user_id or not task:
-        return (
-            jsonify({"status": "error", "message": "Missing userId or task details"}),
-            400,
-        )
-
-    try:
-        db = FB.initializeDB()
-        success = FB.updateTask(
-            db,
-            user_id,
-            task_id,
-            task["title"],
-            task["duration"],
-            task["category"],
-            task["dueDate"],
-        )
-
-        if success:
-            print(f"✅ Task {task_id} updated for user {user_id}")
-            return jsonify({"status": "success", "message": "Task updated"})
-        else:
-            return jsonify({"status": "error", "message": "Task not found"}), 404
-    except Exception as e:
-        print(f"❌ Error updating task: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-
-@app.route("/api/tasks/<task_id>", methods=["DELETE"])
-def delete_task(task_id):
-    print(f"🚀 Incoming DELETE to /api/tasks/{task_id}")
-    user_id = request.args.get("userId")
-
-    if not user_id:
-        return jsonify({"status": "error", "message": "Missing userId"}), 400
-
-    try:
-        db = FB.initializeDB()
-        success = FB.deleteTask(db, user_id, task_id)
-
-        if success:
-            print(f"✅ Task {task_id} deleted for user {user_id}")
-            return jsonify({"status": "success", "message": "Task deleted"})
-        else:
-            return jsonify({"status": "error", "message": "Task not found"}), 404
-    except Exception as e:
-        print(f"❌ Error deleting task: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
+    return jsonify(
+        {
+            "status": "success",
+            "recommendations": [r["summary"] for r in fake_recommendations],
+            "eventLinks": event_urls,
+        }
+    )
 
 
 if __name__ == "__main__":

@@ -1,6 +1,7 @@
 import firebase_admin
 from firebase_admin import firestore
 from firebase_admin import credentials
+from firebase_admin import get_app
 from datetime import datetime
 import pandas as pd
 import os
@@ -12,21 +13,43 @@ TimelyAI Firestore Integration Module
 This module provides functions to interact with Firestore for the TimelyAI project,
 handling user preferences, goals, tasks, and schedule management.
 """
+_DB = None
+
 
 def initializeDB():
-    if not firebase_admin._apps:
+    # if not firebase_admin._apps:
+    #     cred = credentials.Certificate(
+    #         os.path.join(
+    #             os.path.dirname(
+    #                 os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    #             ),
+    #             "firestore_credentials.json",
+    #         )
+    #     )
+    #     firebase_admin.initialize_app(cred)
+
+    # # Get a reference to the Firestore database
+    # return firestore.client()
+    global _DB
+    if _DB is not None:
+        return _DB  # already created –> reuse
+
+    try:
+        # Raises ValueError if the default app hasn’t been created yet
+        get_app()
+    except ValueError:
+        # No default app –> initialise it
         cred = credentials.Certificate(
             os.path.join(
-                os.path.dirname(
-                    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-                ),
+                os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
                 "firestore_credentials.json",
             )
         )
         firebase_admin.initialize_app(cred)
 
-    # Get a reference to the Firestore database
-    return firestore.client()
+    # Create the client once and cache it
+    _DB = firestore.client()
+    return _DB
 
 
 def loadBaseUserPreferences(db, user_id):
@@ -91,6 +114,7 @@ def updateUserGoals(db, user_id, goal, value):
 
 # }
 
+
 def addTask(db, user_id, taskName, taskDuration, taskCategory, taskDeadline):
     """
     Add a new task for the user and return the taskID generated for the task.
@@ -109,7 +133,7 @@ def addTask(db, user_id, taskName, taskDuration, taskCategory, taskDeadline):
     if not doc.exists:
         print("User document does not exist. Creating a new one.")
         loadUserTasks(db, user_id)  # this sets {"tasks": {}}
-        doc = doc_ref.get()         # re-fetch the newly created doc
+        doc = doc_ref.get()  # re-fetch the newly created doc
 
     user_data = doc.to_dict()
     existing_tasks = user_data.get("tasks", {})
@@ -123,28 +147,28 @@ def addTask(db, user_id, taskName, taskDuration, taskCategory, taskDeadline):
         "taskName": taskName,
         "taskDuration": taskDuration,
         "taskCategory": taskCategory,
-        "taskDeadline": taskDeadline
+        "taskDeadline": taskDeadline,
     }
-    doc_ref.update({
-        f"tasks.{task_id}": task_data
-    })
+    doc_ref.update({f"tasks.{task_id}": task_data})
 
     return task_id
 
 
-def updateTask(db, user_id, task_id, taskName, taskDuration, taskCategory, taskDeadline):
+def updateTask(
+    db, user_id, task_id, taskName, taskDuration, taskCategory, taskDeadline
+):
     """Modify an existing task."""
 
     doc_ref = db.collection("UserTasks").document(user_id)
     doc = doc_ref.get()
     if not doc.exists:
         return False
-    
+
     task_data = {
         "taskName": taskName,
         "taskDuration": taskDuration,
         "taskCategory": taskCategory,
-        "taskDeadline": taskDeadline
+        "taskDeadline": taskDeadline,
     }
     # doc_ref.set({taskName: task_data})
     # Update the user document with the new task using the generated task_id
@@ -166,7 +190,7 @@ def updateTask(
         "taskName": taskName,
         "taskDuration": taskDuration,
         "taskCategory": taskCategory,
-        "taskDeadline": taskDeadline
+        "taskDeadline": taskDeadline,
     }
 
     user_data = doc.to_dict()  # Convert document snapshot to dictionary
@@ -215,6 +239,7 @@ def deleteTask(db, user_id, task_id):
 
     return True
 
+
 def updateGoals(db, user_id, goal_category, goal_name, duration):
     """Update user's goal duration."""
     doc_ref = db.collection("UserPreferences").document(user_id)
@@ -231,7 +256,7 @@ def updateGoals(db, user_id, goal_category, goal_name, duration):
         goals[goal_category][goal_name] = duration
     else:
         goals[goal_category] = {goal_name: duration}
-    
+
     updateUserField(user_id, "UserPreferences.goals", goals)
     return True
 
