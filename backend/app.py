@@ -130,6 +130,73 @@ def get_tasks():
 
     return jsonify(tasks)
 
+@app.route('/api/goals', methods=['POST'])
+def save_goals():
+    print("🚀 Incoming POST to /api/goals")
+    data = request.get_json()
+    user_id = data.get("userId")
+    goals = data.get("goals")
+
+    if not user_id or not goals:
+        return jsonify({"status": "error", "message": "Missing userId or goals"}), 400
+
+    db = FB.initializeDB()
+    doc_ref = db.collection("UserPreferences").document(user_id)
+
+    try:
+        doc_ref.set({ "Goals": goals }, merge=True)
+        print(f"✅ Goals saved for user {user_id}")
+        return jsonify({"status": "success", "message": "Goals saved"})
+    except Exception as e:
+        print(f"❌ Error saving goals: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route('/api/goals', methods=['GET'])
+def load_goals():
+    user_id = request.args.get("userId")
+
+    if not user_id:
+        return jsonify({"status": "error", "message": "Missing userId"}), 400
+
+    db = FB.initializeDB()
+    doc_ref = db.collection("UserPreferences").document(user_id)
+
+    try:
+        doc = doc_ref.get()
+        if not doc.exists:
+            print(f"⚠️ No goals found for user {user_id}")
+            return jsonify({"goals": {}})
+        
+        goals = doc.to_dict().get("Goals", {})
+        print(f"✅ Loaded goals for {user_id}: {goals}")
+        return jsonify({"goals": goals})
+    except Exception as e:
+        print(f"❌ Error loading goals: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+    
+
+@app.route('/api/generate-recs', methods=['POST'])
+def generate_recommendations():
+    print("🚀 Incoming POST to /api/generate-recs")
+    data = request.get_json()
+    user_id = data.get("userId")
+
+    if not user_id:
+        return jsonify({ "status": "error", "message": "Missing userId" }), 400
+
+    try:
+        # TODO: Replace with real model call or logic
+        fake_recommendations = [
+            "📚 Study 2 hours tonight for CS exam",
+            "🎨 Spend 1 hour on hobbies this weekend",
+            "💬 Call a friend on Friday"
+        ]
+        print(f"✅ Generated recommendations for {user_id}")
+        return jsonify({ "status": "success", "recommendations": fake_recommendations })
+    except Exception as e:
+        print(f"❌ Error generating recommendations: {e}")
+        return jsonify({ "status": "error", "message": str(e) }), 500
+
 
 if __name__ == '__main__':
     app.run(port=8888)
