@@ -1,3 +1,4 @@
+import { drawPieChart } from './perfectPieChart.js';
 console.log("Welcome to TimelyAI!");
 console.log("🔧 popup.js loaded");
 
@@ -16,6 +17,7 @@ document.addEventListener("DOMContentLoaded", function () {
         try {
             const response = await fetch(`http://localhost:8888/api/tasks?userId=${userId}`);
             const tasks = await response.json();
+            let weeklyBreakup = {"School": 0, "Clubs": 0, "Friends": 0, "Hobbies": 0, "Other": 0};
     
             taskList.innerHTML = ""; // Clear the list
             
@@ -27,6 +29,10 @@ document.addEventListener("DOMContentLoaded", function () {
             tasks.forEach(task => {
                 const emoji = getCategoryEmoji(task.category || "Other");
                 const li = document.createElement("li");
+                if (!isNaN(task.duration) && task.duration.trim() !== "") {
+                    console.log("Duration of task "+ task.duration);
+                    weeklyBreakup[task.category] = weeklyBreakup[task.category] + parseInt(task.duration);
+                }
                 
                 li.innerHTML = `
                     <strong>${emoji} ${task.title}</strong>
@@ -47,6 +53,42 @@ document.addEventListener("DOMContentLoaded", function () {
             
                 taskList.appendChild(li);
             });
+            console.log(weeklyBreakup);
+
+            const svg = document.getElementById("perfectPie");
+
+            // Transform weeklyBreakup into slices:
+            const total = Object.values(weeklyBreakup).reduce((a, b) => a + b, 0);
+            const slices = Object.entries(weeklyBreakup).map(([label, count]) => {
+                const percent = total === 0 ? 0 : (count / total) * 100;
+                const colorMap = {
+                    School: "#3CAE63",
+                    Clubs: "#FF9800",
+                    Friends: "#2196F3",
+                    Hobbies: "#9C27B0",
+                    Other: "#607D8B",
+                };
+                return {
+                    percent: parseFloat(percent.toFixed(1)),
+                    label,
+                    color: colorMap[label] || "#999",
+                };
+            });
+
+            // ✅ Now draw pie with external function
+            // Fetch saved goals and redraw with both data sets
+            try {
+                const res = await fetch("http://localhost:8888/api/goals?userId=TestALL");
+                const data = await res.json();
+                const goals = data.goals || {};
+                drawPieChart(slices, svg, goals);
+                console.log("✅ Pie chart redrawn with goals overlay");
+            } catch (err) {
+                console.error("❌ Failed to fetch goals for pie chart:", err);
+                drawPieChart(slices, svg); // fallback without goals
+            }
+
+
             
             console.log("✅ Tasks refreshed from backend.");
         } catch (err) {
@@ -54,7 +96,7 @@ document.addEventListener("DOMContentLoaded", function () {
             taskList.innerHTML = "<li>Error loading tasks.</li>";
         }
     }
-        // Close button
+    // Close button
     document.getElementById("closeTaskDetailModal").addEventListener("click", () => {
         document.getElementById("taskDetailModal").style.display = "none";
     });
@@ -103,6 +145,7 @@ document.addEventListener("DOMContentLoaded", function () {
         .then(data => {
             console.log('✅ Task added:', data);
             loadTasks(); // 🔄 Refresh task list
+            console.log('TASKS LOADED!');
         })
         .catch(error => {
             console.error('❌ Error sending task:', error);
@@ -184,3 +227,33 @@ function renderEvents(events) {
       }
     });
   }
+
+  document.addEventListener("DOMContentLoaded", function () {
+    const generateBtn = document.getElementById("generateRecsBtn");
+
+    generateBtn.addEventListener("click", async () => {
+        generateBtn.disabled = true;
+        generateBtn.textContent = "Generating...";
+
+        try {
+            const res = await fetch("http://localhost:8888/api/generate-recs", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ userId: "TestALL" })
+            });
+
+            const data = await res.json();
+            if (data.status === "success" && Array.isArray(data.recommendations)) {
+                alert("🎯 Recommendations:\n\n" + data.recommendations.join("\n"));
+            } else {
+                alert("⚠️ No recommendations found.");
+            }
+        } catch (err) {
+            console.error("❌ Failed to fetch recommendations:", err);
+            alert("❌ Error fetching recommendations.");
+        } finally {
+            generateBtn.disabled = false;
+            generateBtn.textContent = "Get Recommendations";
+        }
+    });
+});
