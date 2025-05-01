@@ -25,6 +25,18 @@ from timelyai.backend.model_manager import ModelManager
 app = Flask(__name__)
 CORS(app)
 
+# Initialize Google Calendar with credentials
+script_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(os.path.dirname(script_dir))
+
+# Define paths relative to the project root
+token_path = os.path.join(project_root, "token.json")
+credentials_path = os.path.join(project_root, "credentials.json")
+
+# Initialize calendar and model manager
+calendar = GoogleCalendar(credentials_path, token_path)
+model_manager = ModelManager()
+
 
 @app.route("/api/tasks", methods=["POST"])
 def add_task():
@@ -141,9 +153,6 @@ def generate_recommendations():
 
         tasks = tasks_doc.to_dict().get("tasks", {})
         preferences = prefs_doc.to_dict().get("Goals", {})
-
-        # Initialize Google Calendar API
-        calendar = GoogleCalendar()
 
         # Get user's busy times
         busy_times = calendar.find_busy_slots(
@@ -265,10 +274,6 @@ def delete_task(task_id):
     except Exception as e:
         print(f"❌ Error deleting task: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
-
-
-# Initialize model manager
-model_manager = ModelManager()
 
 
 if __name__ == "__main__":
