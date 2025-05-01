@@ -7,12 +7,9 @@
         "default_popup": "login.html",
         "default_icon": "images/clock.png"
     },
-    "permissions": ["identity","identity.email", "storage"],
-    "oauth2": {
-    "client_id": "426831985998-ojeeoi75l9e1h66es43gikddnt509hil.apps.googleusercontent.com",
-    "scopes": [
-    "https://www.googleapis.com/auth/userinfo.email"
+    "permissions": [
+        "identity",
+        "identity.email",
+        "storage"
     ]
-}
-
 }
