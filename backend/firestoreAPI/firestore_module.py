@@ -9,7 +9,6 @@ import os
 
 """
 TimelyAI Firestore Integration Module
-
 This module provides functions to interact with Firestore for the TimelyAI project,
 handling user preferences, goals, tasks, and schedule management.
 """
@@ -55,10 +54,11 @@ def loadBaseUserPreferences(db, user_id):
 
 def loadUserTasks(db, user_id):
     """
-    Initialize a new user subcollection in the collection "UserTasks".
+    Initialize a new user document in the "UserTasks" collection with an empty task dictionary.
     """
     doc_ref = db.collection("UserTasks").document(user_id)
-    doc_ref.set({})
+    doc_ref.set({"tasks": {}})
+    return True
 
 
 def getUserDocument(db, user_id):
@@ -91,42 +91,55 @@ def updateUserGoals(db, user_id, goal, value):
 
 # }
 
-
 def addTask(db, user_id, taskName, taskDuration, taskCategory, taskDeadline):
     """
     Add a new task for the user and return the taskID generated for the task.
 
-    db = initilized firestore database
-    task_name = name of the task (String)
-    task_duration = duration it takes to complete the task (int)
-    task_deadline = datetime object formatted in str as '%d/%m/%y %H:%M:%S' (datetime)
-    task_category = category of tasks assigned by users (str)
+    db = initialized Firestore database
+    user_id = ID of the user (str)
+    taskName = name of the task (str)
+    taskDuration = duration it takes to complete the task (str or int)
+    taskDeadline = deadline as a string (e.g. '08/05/25')
+    taskCategory = category label (str)
     """
 
     doc_ref = db.collection("UserTasks").document(user_id)
     doc = doc_ref.get()
+
     if not doc.exists:
-        return None
+        print("User document does not exist. Creating a new one.")
+        loadUserTasks(db, user_id)  # this sets {"tasks": {}}
+        doc = doc_ref.get()         # re-fetch the newly created doc
 
-    # task_data["createdAt"] = firestore.SERVER_TIMESTAMP
-    # task_data["updatedAt"] = firestore.SERVER_TIMESTAMP
+    user_data = doc.to_dict()
+    existing_tasks = user_data.get("tasks", {})
+
     # Generate a unique task ID
-
-    user_data = doc.to_dict()  # Convert document snapshot to dictionary
-    existing_tasks = user_data.get(
-        "tasks", {}
-    )  # Get 'tasks' field or empty dict if it doesn't exist
-
     task_id = None
-    first = True
-
     while task_id is None or task_id in existing_tasks:
-        if first:
-            first = False
-        else:
-            print("Task ID already exists, generating another.")
-        task_id = db.collection("UserTasks").document().id  # This generates a random ID
+        task_id = db.collection("UserTasks").document().id
 
+    task_data = {
+        "taskName": taskName,
+        "taskDuration": taskDuration,
+        "taskCategory": taskCategory,
+        "taskDeadline": taskDeadline
+    }
+    doc_ref.update({
+        f"tasks.{task_id}": task_data
+    })
+
+    return task_id
+
+
+def updateTask(db, user_id, task_id, taskName, taskDuration, taskCategory, taskDeadline):
+    """Modify an existing task."""
+
+    doc_ref = db.collection("UserTasks").document(user_id)
+    doc = doc_ref.get()
+    if not doc.exists:
+        return False
+    
     task_data = {
         "taskName": taskName,
         "taskDuration": taskDuration,
@@ -218,6 +231,8 @@ def updateGoals(db, user_id, goal_category, goal_name, duration):
         goals[goal_category][goal_name] = duration
     else:
         goals[goal_category] = {goal_name: duration}
+    
+    updateUserField(user_id, "UserPreferences.goals", goals)
     return True
 
 
@@ -280,12 +295,12 @@ def TestRunUserPref():
 
 
 # TestRunUserPref()
-db = initializeDB()
-user_id = "TestALL2"
-taskID = "6VSfb3LDldhurSLE4cQl"
-deadline = datetime.strptime("31/01/22 23:59:59", "%d/%m/%y %H:%M:%S")
+# db = initializeDB()
+# user_id = "TestMinhaj"
+# taskID = "6VSfb3LDldhurSLE4cQl"
+# deadline = datetime.strptime('31/01/22 23:59:59','%d/%m/%y %H:%M:%S')
 # loadUserTasks(db,user_id)
 # loadBaseUserPreferences(db,user_id)
-# addTask(db,user_id,"taskTwo",5,"Studying",deadline)
-# updateTask(db,user_id,taskID,"taskTwoEdited",5,"Editing",deadline)
-deleteTask(db, user_id, taskID)
+# # addTask(db,user_id,"taskTwo",5,"Studying",deadline)
+# # updateTask(db,user_id,taskID,"taskTwoEdited",5,"Editing",deadline)
+# deleteTask(db,user_id,taskID)
