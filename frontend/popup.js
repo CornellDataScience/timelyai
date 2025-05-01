@@ -7,18 +7,21 @@ document.addEventListener("DOMContentLoaded", function () {
     const modal = document.getElementById("taskModal");
     const closeButton = document.querySelector(".close");
     const submitTaskButton = document.getElementById("submitTask");
+    let userId;
 
-    const userId = "TestALL"; // You can later make this dynamic
+    chrome.storage.local.get(['userEmail'], function(result) {
+        userId = result.userEmail;
+        console.log("Retrieved email:", userId); // <-- fixed variable name
+        loadTasks(userId); // <-- pass it into your async function
+      });
 
-    // load task from firestore
-    async function loadTasks() {
+    async function loadTasks(userId) {
         taskList.innerHTML = "<li>Loading tasks...</li>"; // ⏳ loading indicator
         try {
             const response = await fetch(`http://localhost:8888/api/tasks?userId=${userId}`);
             const tasks = await response.json();
     
             taskList.innerHTML = ""; // Clear the list
-            
             if (tasks.length === 0) {
                 taskList.innerHTML = "<li>No tasks found.</li>";
                 return;
@@ -27,33 +30,33 @@ document.addEventListener("DOMContentLoaded", function () {
             tasks.forEach(task => {
                 const emoji = getCategoryEmoji(task.category || "Other");
                 const li = document.createElement("li");
-                
+    
                 li.innerHTML = `
                     <strong>${emoji} ${task.title}</strong>
                     <span>Due: ${task.dueDate} | Duration: ${task.duration} | Category: ${task.category}</span>
                 `;
-                
-                li.style.cursor = "pointer"; 
-
-                // ✅ Add click listener to show modal
+    
+                li.style.cursor = "pointer";
+    
                 li.addEventListener("click", () => {
                     document.getElementById("taskModalTitle").textContent = task.title;
                     document.getElementById("taskModalDue").textContent = task.dueDate;
                     document.getElementById("taskModalDuration").textContent = task.duration;
                     document.getElementById("taskModalCategory").textContent = task.category;
-            
+    
                     document.getElementById("taskDetailModal").style.display = "block";
                 });
-            
+    
                 taskList.appendChild(li);
             });
-            
+    
             console.log("✅ Tasks refreshed from backend.");
         } catch (err) {
             console.error("❌ Failed to fetch tasks:", err);
             taskList.innerHTML = "<li>Error loading tasks.</li>";
         }
     }
+    
         // Close button
     document.getElementById("closeTaskDetailModal").addEventListener("click", () => {
         document.getElementById("taskDetailModal").style.display = "none";
@@ -66,10 +69,6 @@ document.addEventListener("DOMContentLoaded", function () {
             modal.style.display = "none";
         }
     });
-
-
-    // 🚀 Initial task load
-    loadTasks();
 
     // 🎯 Modal logic
     addTaskButton.addEventListener("click", () => modal.style.display = "block");
@@ -102,7 +101,7 @@ document.addEventListener("DOMContentLoaded", function () {
         .then(res => res.json())
         .then(data => {
             console.log('✅ Task added:', data);
-            loadTasks(); // 🔄 Refresh task list
+            loadTasks(userId); // 🔄 Refresh task list
         })
         .catch(error => {
             console.error('❌ Error sending task:', error);
@@ -115,21 +114,6 @@ document.addEventListener("DOMContentLoaded", function () {
         document.getElementById("taskDuration").value = "";
         document.getElementById("taskCategory").value = "School";
     });
-
-    // 📅 Simple event creation alert
-    document.getElementById("createEvent").addEventListener("click", function () {
-        const title = document.getElementById("eventTitle").value;
-        const date = document.getElementById("eventDate").value;
-        const time = document.getElementById("eventTime").value;
-        const location = document.getElementById("eventLocation").value;
-
-        if (title && date && time && location) {
-            alert(`Event Created: ${title} on ${date} at ${time} in ${location}`);
-        } else {
-            alert("Please fill out all fields!");
-        }
-    });
-});
 
 // 🎨 Emoji utility
 function getCategoryEmoji(category) {
@@ -184,3 +168,4 @@ function renderEvents(events) {
       }
     });
   }
+});

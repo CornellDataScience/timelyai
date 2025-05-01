@@ -1,10 +1,9 @@
-<!-- login.html -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
+  <meta charset="UTF-8" />
   <title>Login - TimelyAI</title>
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
   <div class="container">
@@ -13,17 +12,6 @@
     <button id="loginBtn">🔐 Sign in with Google</button>
   </div>
 
-  <script>
-    document.getElementById('loginBtn').addEventListener('click', async () => {
-      chrome.identity.getProfileUserInfo({ accountStatus: "ANY" }, (userInfo) => {
-        if (userInfo.email) {
-          chrome.storage.local.set({ userEmail: userInfo.email }, () => {
-            // redirect to main page
-            window.location.href = "index.html";
-          });
-        }
-      });
-    });
-  </script>
+  <script src="oauth.js"></script>
 </body>
 </html>
