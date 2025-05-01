@@ -35,19 +35,17 @@ def loadBaseUserPreferences(db, user_id):
     """
     doc_ref = db.collection("UserPreferences").document(user_id)
     goals = {
-        "Exercise": {"Run": 0, "Gym": 0},
-        "Socialize": 0,
-        "Sleep": 56,
-        "Jobs": 0,
-        "Hobbies": 0,
-        "Other": {},
+        "Clubs": 25,
+        "Friends": 20,
+        "Hobbies": 15,
+        "Other": 5,
+        "School": 4
     }
     sleep_schedule = {"wakeTime": "08:00 AM", "bedTime": "11:00 PM"}
     data = {
-        "goals": goals,
-        "sleep_schedule": sleep_schedule,
+        "Goals": goals,
+        "Sleep": sleep_schedule,
     }
-
     doc_ref.set(data)
     return data
 
@@ -58,6 +56,16 @@ def loadUserTasks(db, user_id):
     """
     doc_ref = db.collection("UserTasks").document(user_id)
     doc_ref.set({"tasks": {}})
+    return True
+
+
+def initUser(db, user_id):
+    """
+    Initialize a new user document in Firestore with default values.
+    """
+    loadBaseUserPreferences(db, user_id)
+    loadUserTasks(db, user_id)
+
     return True
 
 
@@ -86,10 +94,6 @@ def updateUserGoals(db, user_id, goal, value):
     )
     return True
 
-
-# def updateUserSleep() {
-
-# }
 
 def addTask(db, user_id, taskName, taskDuration, taskCategory, taskDeadline):
     """
@@ -129,26 +133,6 @@ def addTask(db, user_id, taskName, taskDuration, taskCategory, taskDeadline):
         f"tasks.{task_id}": task_data
     })
 
-    return task_id
-
-
-def updateTask(db, user_id, task_id, taskName, taskDuration, taskCategory, taskDeadline):
-    """Modify an existing task."""
-
-    doc_ref = db.collection("UserTasks").document(user_id)
-    doc = doc_ref.get()
-    if not doc.exists:
-        return False
-    
-    task_data = {
-        "taskName": taskName,
-        "taskDuration": taskDuration,
-        "taskCategory": taskCategory,
-        "taskDeadline": taskDeadline
-    }
-    # doc_ref.set({taskName: task_data})
-    # Update the user document with the new task using the generated task_id
-    doc_ref.update({f"tasks.{task_id}": task_data})
     return task_id
 
 
@@ -215,26 +199,6 @@ def deleteTask(db, user_id, task_id):
 
     return True
 
-def updateGoals(db, user_id, goal_category, goal_name, duration):
-    """Update user's goal duration."""
-    doc_ref = db.collection("UserPreferences").document(user_id)
-    doc = doc_ref.get()
-    if not doc.exists:
-        return False
-
-    user_data = doc.to_dict()
-    goals = user_data.get("UserPreferences", {}).get("goals", {})
-    if goal_category not in goals:
-        return False
-
-    if isinstance(goals[goal_category], dict):
-        goals[goal_category][goal_name] = duration
-    else:
-        goals[goal_category] = {goal_name: duration}
-    
-    updateUserField(user_id, "UserPreferences.goals", goals)
-    return True
-
 
 def loadUserCalendarDataframe(db, df, collection_name, user_id):
     """
@@ -273,6 +237,38 @@ def loadUserCalendarDataframe(db, df, collection_name, user_id):
     user_doc_ref.set({"events": events_dict})
     print("Successfully wrote events dictionary to Firestore")
 
+def userTasksExists(db, user_id):
+    """
+    Check if a user document exists in the "UserTasks" collection and if it contains tasks.
+
+    Args:
+        db: initialized Firestore database
+        user_id (str): ID of the user
+
+    Returns:
+        bool: True if the user document exists and contains tasks, False otherwise
+    """
+    doc_ref = db.collection("UserTasks").document(user_id)
+    doc = doc_ref.get()
+    print("doc.exists", doc.exists)
+    return doc.exists
+
+def userPreferencesExists(db, user_id):
+    """
+    Check if a user document exists in the "UserPreferences" collection.
+
+    Args:
+        db: initialized Firestore database
+        user_id (str): ID of the user
+
+    Returns:
+        bool: True if the user document exists, False otherwise
+    """
+    doc_ref = db.collection("UserPreferences").document(user_id)
+    doc = doc_ref.get()
+    print("doc.exists", doc.exists)
+    return doc.exists
+
 
 def TestRunCSV():
     db = initializeDB()
@@ -296,6 +292,7 @@ def TestRunUserPref():
 
 # TestRunUserPref()
 # db = initializeDB()
+# userTasksExists(db,"TestMinhaj")
 # user_id = "TestMinhaj"
 # taskID = "6VSfb3LDldhurSLE4cQl"
 # deadline = datetime.strptime('31/01/22 23:59:59','%d/%m/%y %H:%M:%S')

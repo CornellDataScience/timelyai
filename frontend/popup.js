@@ -2,23 +2,35 @@ import { drawPieChart } from './perfectPieChart.js';
 console.log("Welcome to TimelyAI!");
 console.log("🔧 popup.js loaded");
 
+let userId;
 document.addEventListener("DOMContentLoaded", function () {
     const taskList = document.getElementById("taskList");
     const addTaskButton = document.getElementById("showTaskForm");
     const modal = document.getElementById("taskModal");
     const closeButton = document.querySelector(".close");
     const submitTaskButton = document.getElementById("submitTask");
-    let userId;
+
 
     chrome.storage.local.get(['userEmail'], function(result) {
         userId = result.userEmail;
         localStorage.setItem("userId", userId);
         console.log("Retrieved email:", userId); // <-- fixed variable name
-        loadTasks(userId); // <-- pass it into your async function
-      });
+        // 💬 Inject welcome message
+        const welcomeEl = document.getElementById("welcomeUser");
 
-    async function loadTasks(userId) {
+        if (welcomeEl && userId) {
+            welcomeEl.textContent = `Welcome, ${userId}`;
+        }
+
+        loadTasks(); // <-- pass it into your async function
+    });
+
+    async function loadTasks() {
         taskList.innerHTML = "<li>Loading tasks...</li>"; // ⏳ loading indicator
+        chrome.storage.local.get(["userEmail"], (result) => {
+            userId = result.userEmail;
+            console.log("📦 Loaded userEmail from storage:", userId);
+        });
         try {
             const response = await fetch(`http://localhost:8888/api/tasks?userId=${userId}`);
             const tasks = await response.json();
@@ -39,20 +51,26 @@ document.addEventListener("DOMContentLoaded", function () {
                 }
                 
                 li.innerHTML = `
-                    <strong>${emoji} ${task.title}</strong>
+                    <div class="top-row-todo-item">
+                        <strong class="todo-item-title">${emoji} ${task.title}</strong>
+                        <div class="todo-item-buttons">
+                        <button class="edit-task">✏️</button>
+                        <button class="delete-task">❌</button>
+                        </div>
+                    </div>
                     <span>Due: ${task.dueDate} | Duration: ${task.duration} | Category: ${task.category}</span>
-                `;
+                    `;
     
-                li.style.cursor = "pointer";
+                // li.style.cursor = "pointer";
     
-                li.addEventListener("click", () => {
-                    document.getElementById("taskModalTitle").textContent = task.title;
-                    document.getElementById("taskModalDue").textContent = task.dueDate;
-                    document.getElementById("taskModalDuration").textContent = task.duration;
-                    document.getElementById("taskModalCategory").textContent = task.category;
+                // li.addEventListener("click", () => {
+                //     document.getElementById("taskModalTitle").textContent = task.title;
+                //     document.getElementById("taskModalDue").textContent = task.dueDate;
+                //     document.getElementById("taskModalDuration").textContent = task.duration;
+                //     document.getElementById("taskModalCategory").textContent = task.category;
     
-                    document.getElementById("taskDetailModal").style.display = "block";
-                });
+                //     document.getElementById("taskDetailModal").style.display = "block";
+                // });
     
                 taskList.appendChild(li);
             });
@@ -81,6 +99,7 @@ document.addEventListener("DOMContentLoaded", function () {
             // ✅ Now draw pie with external function
             // Fetch saved goals and redraw with both data sets
             try {
+                console.log("Fetching goals for pie chart for userId:", userId);
                 const res = await fetch(`http://localhost:8888/api/goals?userId=${userId}`);
                 const data = await res.json();
                 const goals = data.goals || {};
@@ -90,9 +109,6 @@ document.addEventListener("DOMContentLoaded", function () {
                 console.error("❌ Failed to fetch goals for pie chart:", err);
                 drawPieChart(slices, svg); // fallback without goals
             }
-
-
-            
             console.log("✅ Tasks refreshed from backend.");
         } catch (err) {
             console.error("❌ Failed to fetch tasks:", err);
@@ -158,62 +174,8 @@ document.addEventListener("DOMContentLoaded", function () {
         document.getElementById("taskDuration").value = "";
         document.getElementById("taskCategory").value = "School";
     });
-
-// 🎨 Emoji utility
-function getCategoryEmoji(category) {
-    switch (category) {
-        case "School": return "📚";
-        case "Clubs": return "🏀";
-        case "Friends": return "👯‍♀️";
-        case "Hobbies": return "🎨";
-        case "Other": return "💪";
-        default: return "✅";
-    }
-}
-
-function renderEvents(events) {
-    const eventListEl = document.getElementById("eventList");
-  
-    eventListEl.innerHTML = "";
-  
-    if (Object.keys(events).length === 0) {
-      eventListEl.innerHTML = "<li>No events found.</li>";
-      return;
-    }
-  
-    for (const [id, e] of Object.entries(events)) {
-      const li = document.createElement("li");
-      li.innerHTML = `
-        <strong>${e.summary || e.title}</strong>
-        <span>${e.start_time ? new Date(e.start_time).toLocaleString() : ""}</span>
-        <span>${e.location || ""}</span>
-      `;
-  
-      // ✅ Show event modal on click
-      li.addEventListener("click", () => {
-        document.getElementById("eventModalTitle").textContent = e.summary || e.title;
-        document.getElementById("eventModalTime").textContent = new Date(e.start_time).toLocaleString();
-        document.getElementById("eventModalLocation").textContent = e.location || "Not specified";
-  
-        document.getElementById("eventModal").style.display = "block";
-      });
-  
-      eventListEl.appendChild(li);
-    }
-  
-    // 🔁 Modal close behavior
-    document.getElementById("closeEventModal").addEventListener("click", () => {
-      document.getElementById("eventModal").style.display = "none";
-    });
-  
-    window.addEventListener("click", (event) => {
-      if (event.target === document.getElementById("eventModal")) {
-        document.getElementById("eventModal").style.display = "none";
-      }
-    });
-  }
-
-  document.addEventListener("DOMContentLoaded", function () {
+});
+document.addEventListener("DOMContentLoaded", function () {
     const generateBtn = document.getElementById("generateRecsBtn");
 
     generateBtn.addEventListener("click", async () => {
@@ -242,4 +204,16 @@ function renderEvents(events) {
         }
     });
 });
-});
+
+// 🎨 Emoji utility
+function getCategoryEmoji(category) {
+    switch (category) {
+        case "School": return "📚";
+        case "Clubs": return "🏀";
+        case "Friends": return "👯‍♀️";
+        case "Hobbies": return "🎨";
+        case "Other": return "💪";
+        default: return "✅";
+    }
+}
+console.log("Popup loaded")

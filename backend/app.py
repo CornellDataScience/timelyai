@@ -59,10 +59,34 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 from firestoreAPI import firestore_module as FB
 from datetime import datetime
+from google.api_core.exceptions import GoogleAPIError
 import json
 
 app = Flask(__name__)
 CORS(app)
+db = FB.initializeDB()
+
+
+@app.route('/api/init-user', methods=['POST'])
+def init_user():
+    user_id = request.json.get("userId")
+    print("🚀 Incoming POST to /api/init-user for userID: ", user_id)
+
+    if not user_id:
+        return jsonify({"error": "Missing userId"}), 400
+
+    # Only initialize if the document doesn't exist
+    if not FB.userTasksExists(db, user_id):
+        print(f"⚠️ User {user_id} does not exist. Initializing...")
+        FB.loadUserTasks(db, user_id)
+        print(f"📄 Created task doc for {user_id}")
+
+    if not FB.userPreferencesExists(db, user_id):
+        print(f"⚠️ User {user_id} preferences do not exist. Initializing...")
+        FB.loadBaseUserPreferences(db, user_id)
+        print(f"📄 Created preferences doc for {user_id}")
+
+    return jsonify({ "status": "initialized" })
 
 
 @app.route('/api/tasks', methods=['POST'])
@@ -71,16 +95,12 @@ def add_task():
     data = request.get_json()
     userId = data.get('userId')
     task = data.get('taskDetails')
-   
+
     print(f"✅ Task received from {userId}: {task}")
 
-    db = FB.initializeDB()
+
     task_id = FB.addTask(db,userId,task["title"], task["duration"], task["category"],task["dueDate"])
     print(f"✅ Task added to {userId}: {task_id}")
-    # You can now do something with the task here, like:
-    # - Save to DB
-    # - Run your optimizer
-    # - Respond with a suggested schedule
 
     return jsonify({'status': 'success', 'message': 'Task processed', 'received': task})
 
@@ -109,26 +129,39 @@ def add_task():
 @app.route('/api/tasks', methods=['GET'])
 def get_tasks():
     user_id = request.args.get("userId")
-    db = FB.initializeDB()
-    doc_ref = db.collection("UserTasks").document(user_id)
-    doc = doc_ref.get()
 
-    if not doc.exists:
-        return jsonify([])
+    if not user_id:
+        return jsonify({"error": "Missing userId"}), 400
 
-    tasks_map = doc.to_dict().get("tasks", {})
-    tasks = []
+    try:
+        print(f"📡 Firestore read attempt for userId={user_id} at {datetime.now()}")
+        doc_ref = db.collection("UserTasks").document(user_id)
+        doc = doc_ref.get(timeout=5)  # Optional timeout to avoid long hangs
 
-    for task_id, task_data in tasks_map.items():
-        tasks.append({
-            "id": task_id,
-            "title": task_data.get("taskName", "Untitled"),
-            "dueDate": task_data.get("taskDeadline", "TBD"),
-            "duration": task_data.get("taskDuration", "TBD"),
-            "category": task_data.get("taskCategory", "None")
-        })
+        if not doc.exists:
+            return jsonify([])
 
-    return jsonify(tasks)
+        tasks_map = doc.to_dict().get("tasks", {})
+        tasks = []
+
+        for task_id, task_data in tasks_map.items():
+            tasks.append({
+                "id": task_id,
+                "title": task_data.get("taskName", "Untitled"),
+                "dueDate": task_data.get("taskDeadline", "TBD"),
+                "duration": task_data.get("taskDuration", "TBD"),
+                "category": task_data.get("taskCategory", "None")
+            })
+
+        return jsonify(tasks)
+
+    except GoogleAPIError as e:
+        print(f"❌ Firestore error for userId={user_id}: {e}")
+        return jsonify({"error": "Firestore service unavailable"}), 503
+
+    except Exception as e:
+        print(f"❌ Unexpected error in /api/tasks for userId={user_id}: {e}")
+        return jsonify({"error": "Internal server error"}), 500
 
 @app.route('/api/goals', methods=['POST'])
 def save_goals():
@@ -140,7 +173,6 @@ def save_goals():
     if not user_id or not goals:
         return jsonify({"status": "error", "message": "Missing userId or goals"}), 400
 
-    db = FB.initializeDB()
     doc_ref = db.collection("UserPreferences").document(user_id)
 
     try:
@@ -151,6 +183,7 @@ def save_goals():
         print(f"❌ Error saving goals: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
+
 @app.route('/api/goals', methods=['GET'])
 def load_goals():
     user_id = request.args.get("userId")
@@ -158,7 +191,7 @@ def load_goals():
     if not user_id:
         return jsonify({"status": "error", "message": "Missing userId"}), 400
 
-    db = FB.initializeDB()
+    
     doc_ref = db.collection("UserPreferences").document(user_id)
 
     try:

@@ -133,7 +133,7 @@ async function loadGoals() {
                 "Other": "#607D8B"
             };
 
-            slices = Object.entries(data.goals).map(([label, percent]) => ({
+            const slices = Object.entries(data.goals).map(([label, percent]) => ({
                 label,
                 percent,
                 color: colorMap[label] || "#999999"
@@ -145,7 +145,8 @@ async function loadGoals() {
             console.log("⚠️ No saved goals found. Using defaults.");
         }
     } catch (err) {
-        console.error("❌ Error loading goals from backend:", err);
+        // console.error("❌ Error loading goals from backend:", err);
+        console.log("⚠️ No saved goals found. Using defaults.");
     }
 }
 
