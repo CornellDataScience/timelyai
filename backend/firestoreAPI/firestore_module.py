@@ -125,7 +125,6 @@ def addTask(db, user_id, taskName, taskDuration, taskCategory, taskDeadline):
         "taskCategory": taskCategory,
         "taskDeadline": taskDeadline
     }
-
     doc_ref.update({
         f"tasks.{task_id}": task_data
     })
@@ -145,10 +144,31 @@ def updateTask(db, user_id, task_id, taskName, taskDuration, taskCategory, taskD
         "taskName": taskName,
         "taskDuration": taskDuration,
         "taskCategory": taskCategory,
-        # "taskDeadline": taskDeadline.strftime('%ds/%m/%y %H:%M:%S')
         "taskDeadline": taskDeadline
-        }
-    
+    }
+    # doc_ref.set({taskName: task_data})
+    # Update the user document with the new task using the generated task_id
+    doc_ref.update({f"tasks.{task_id}": task_data})
+    return task_id
+
+
+def updateTask(
+    db, user_id, task_id, taskName, taskDuration, taskCategory, taskDeadline
+):
+    """Modify an existing task."""
+
+    doc_ref = db.collection("UserTasks").document(user_id)
+    doc = doc_ref.get()
+    if not doc.exists:
+        return False
+
+    task_data = {
+        "taskName": taskName,
+        "taskDuration": taskDuration,
+        "taskCategory": taskCategory,
+        "taskDeadline": taskDeadline
+    }
+
     user_data = doc.to_dict()  # Convert document snapshot to dictionary
     existing_tasks = user_data.get(
         "tasks", {}
@@ -194,7 +214,6 @@ def deleteTask(db, user_id, task_id):
     doc_ref.update({f"tasks.{task_id}": firestore.DELETE_FIELD})
 
     return True
-
 
 def updateGoals(db, user_id, goal_category, goal_name, duration):
     """Update user's goal duration."""

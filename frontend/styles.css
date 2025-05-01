@@ -367,6 +367,23 @@ button:hover {
   width: 100%;
   height: 1px;
 }
-  
-  
-  
+
+.generateRecsButton {
+  margin: 0px;
+  margin: 10px;
+}
+
+.generateRecsSection {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  width: 100vw;
+  background-color: #3CAE63;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-top: 1px rgb(0, 0, 0);
+  background-color: rgb(255, 255, 255);
+  z-index: 999;
+  box-shadow: 0 -2px 5px rgba(0,0,0,0.1);
+}

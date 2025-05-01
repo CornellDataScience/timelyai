@@ -111,7 +111,7 @@
     
             <!-- Weekly Breakdown Pie Chart -->
             <div id="weeklyBreakdown" class="section">
-                <button id="showBreakdownForm">Edit Preferences</button>
+                <button id="showBreakdownForm">Edit Goals</button>
                 <div class="divider"></div>
                 <div class="svg-pie-container">
                     <h2>Weekly Breakup:</h2>
@@ -195,10 +195,13 @@ popup.js:214 Uncaught SyntaxError: Unexpected end of inputUnderstand this error
         <p><strong>Category:</strong> <span id="taskModalCategory"></span></p>
       </div>
     </div>
+    <div class="generateRecsSection">
+        <button class="generateRecsButton" id="generateRecsBtn">Get Recommendations</button>
+    </div>    
 
-    <script src="popup.js"></script>
-    <script src="breakdownPopup.js"></script>
-    <script src="perfectPieChart.js"></script>
+    <script type="module" src="popup.js"></script>
+    <!-- <script src="breakdownPopup.js"></script> -->
+    <script type="module" src="perfectPieChart.js"></script>
     <script src="main.js"></script>
 </body>
 </html>
