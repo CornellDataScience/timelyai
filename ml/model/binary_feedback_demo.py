@@ -1,18 +1,22 @@
+#!/usr/bin/env python3
+"""
+FOR TESTING PURPOSES:Binary Feedback Demo for the time recommendation system.
+This script demonstrates how the model learns from binary accept/reject feedback
+and improves its recommendations over time.
+"""
+
 import os
 import sys
-import numpy as np
-from datetime import datetime, timedelta
+from datetime import datetime
 from contextual_bandits import (
+    train_model,
+    predict_best_time,
     generate_recommendations,
     record_binary_feedback,
     update_model,
     reset_recommended_times,
-    add_scheduled_event,
-    add_blocked_time,
-    clear_blocked_times,
-    clear_scheduled_events,
-    format_day_and_time,
     format_duration,
+    create_training_example,
 )
 from event_categories import (
     CATEGORIES,
@@ -22,84 +26,16 @@ from event_categories import (
 )
 
 
-def simulate_user_preference(
-    task_type, recommended_time, day_of_week, prefer_splitting=False
-):
-    """
-    Simulate whether a user would accept a time recommendation.
-    This is a simplified simulation - in a real application, this would be
-    based on actual user feedback.
-
-    Args:
-        task_type: Type of task (e.g., 'hw', 'meeting', 'reading')
-        recommended_time: The recommended time slot
-        day_of_week: Day of the week (0=Monday, 6=Sunday)
-        prefer_splitting: Whether the user prefers to split long tasks
-
-    Returns:
-        True if the user would accept the recommendation, False otherwise
-    """
-    # Get category information for the task type
-    category = get_category_for_event_type(task_type)
-    event_info = get_event_type_info(task_type)
-
-    # If we have event info, use it to determine acceptance
-    if event_info:
-        # Check if the recommended time is within the preferred times
-        preferred_times = event_info.get("preferred_times", [])
-        if preferred_times:
-            # Check if the recommended time is within any of the preferred time ranges
-            for time_range in preferred_times:
-                # Handle both tuple and list formats
-                if isinstance(time_range, (tuple, list)) and len(time_range) == 2:
-                    start_time, end_time = time_range
-                    if start_time <= recommended_time <= end_time:
-                        return True
-                # Handle single value format
-                elif isinstance(time_range, (int, float)):
-                    # If it's a single value, consider it a preferred time with a 1-hour window
-                    if abs(time_range - recommended_time) <= 0.5:
-                        return True
-
-    # Fallback to task-specific logic
-    if task_type.lower() in ["hw", "homework", "study", "reading"]:
-        # Prefer morning or evening for academic tasks
-        return 8.0 <= recommended_time <= 11.0 or 18.0 <= recommended_time <= 21.0
-    elif task_type.lower() in ["meeting", "call", "interview"]:
-        # Prefer middle of the day for meetings
-        return 10.0 <= recommended_time <= 16.0
-    elif task_type.lower() in ["project", "work", "coding"]:
-        # For project work, consider the prefer_splitting parameter
-        if prefer_splitting:
-            # If user prefers splitting, accept shorter time slots
-            return True
-        else:
-            # Otherwise, prefer longer uninterrupted blocks
-            return 9.0 <= recommended_time <= 17.0
-    elif task_type.lower() in ["workout", "exercise", "gym"]:
-        # Prefer morning or evening for workouts
-        return 6.0 <= recommended_time <= 9.0 or 17.0 <= recommended_time <= 20.0
-    elif task_type.lower() in ["relaxation", "relax", "break", "rest"]:
-        # Accept any time for relaxation
-        return True
-    else:
-        # Default: accept with 70% probability
-        return np.random.random() < 0.7
+def format_time(time_value):
+    """Format a time value (e.g., 13.5) as a time string (e.g., 13:30)."""
+    hours = int(time_value)
+    minutes = int((time_value - hours) * 60)
+    return f"{hours:02d}:{minutes:02d}"
 
 
-def format_day_and_time(day_of_week, time_slot, duration=None):
-    """
-    Format a day and time slot as a human-readable string.
-
-    Args:
-        day_of_week: Day of the week (0=Monday, 6=Sunday)
-        time_slot: Time slot in 24-hour format (e.g., 14.0 for 2:00 PM)
-        duration: Optional duration in hours
-
-    Returns:
-        A formatted string (e.g., "Monday at 14:00 for 2 hours")
-    """
-    day_names = [
+def format_day_and_time(day, time, duration=None):
+    """Format day and time into a human-readable string."""
+    days = [
         "Monday",
         "Tuesday",
         "Wednesday",
@@ -108,225 +44,316 @@ def format_day_and_time(day_of_week, time_slot, duration=None):
         "Saturday",
         "Sunday",
     ]
-    day_str = day_names[day_of_week]
+    time_str = format_time(time)
+    if duration:
+        return f"{days[day]} at {time_str} for {format_duration(duration)}"
+    return f"{days[day]} at {time_str}"
 
-    hours = int(time_slot)
-    minutes = int((time_slot - hours) * 60)
-    time_str = f"{hours:02d}:{minutes:02d}"
 
-    if duration is not None:
-        duration_str = format_duration(duration)
-        return f"{day_str} at {time_str} for {duration_str}"
-    else:
-        return f"{day_str} at {time_str}"
+def simulate_user_preference(task_type, time, day, prefer_splitting=False):
+    """
+    Simulate user preference for a time recommendation.
+    Returns True if the user accepts the recommendation, False otherwise.
+    """
+    # Get event info for the task type
+    event_info = get_event_type_info(task_type)
+    if not event_info:
+        return True  # Default to accepting if no event info
+
+    # Get preferred times for this task type
+    preferred_times = event_info.get("preferred_times", [])
+    if not preferred_times:
+        return True  # Default to accepting if no preferred times
+
+    # Check if the recommended time is in the preferred range
+    if preferred_times == "morning" and 6 <= time < 12:
+        return True
+    elif preferred_times == "afternoon" and 12 <= time < 17:
+        return True
+    elif preferred_times == "evening" and 17 <= time < 22:
+        return True
+    elif preferred_times == "night" and (time >= 22 or time < 6):
+        return True
+
+    # For long tasks with splitting, be more lenient
+    if prefer_splitting:
+        return True
+
+    # If not in preferred range, 70% chance of rejection
+    return False
 
 
 def main():
     """Run a demo of the binary feedback system."""
-    print("🚀 Starting Binary Feedback Demo")
-    print("=================================")
+    print("🔄 Binary Feedback Learning Demo 🔄")
+    print("===================================\n")
 
-    # Reset recommended times
+    # Train the initial model
+    print("1️⃣ Training the initial model...")
+    train_model()
+
+    # First round of recommendations
+    print("\n2️⃣ First round of recommendations (before feedback)...\n")
     reset_recommended_times()
 
-    # Clear any existing blocked times and scheduled events
-    clear_blocked_times()
-    clear_scheduled_events()
-
-    # Add some example scheduled events
-    print("\n📅 Adding scheduled events:")
-    add_scheduled_event(0, 9.0, 10.5, "Math Class")  # Monday 9:00 AM - 10:30 AM
-    add_scheduled_event(0, 11.0, 12.5, "Science Class")  # Monday 11:00 AM - 12:30 PM
-    add_scheduled_event(2, 14.0, 15.5, "History Class")  # Wednesday 2:00 PM - 3:30 PM
-    add_scheduled_event(4, 13.0, 14.5, "English Class")  # Friday 1:00 PM - 2:30 PM
-
-    # Add some other blocked times
-    print("\n🕒 Adding other blocked times:")
-    add_blocked_time(1, 15.0, 16.0, "Doctor Appointment")  # Tuesday 3:00 PM - 4:00 PM
-    add_blocked_time(3, 12.0, 13.0, "Lunch Meeting")  # Thursday 12:00 PM - 1:00 PM
-
-    # Example 1: Short task (homework)
-    print("\n📝 Example 1: Short task (homework)")
-    print("----------------------------------")
-    result = generate_recommendations(
-        task_type="hw", task_duration=1.5, hours_until_due=48, daily_free_time=6.0
+    # Example 1: School task (homework due tomorrow)
+    print("📚 Example 1: Homework due tomorrow (urgent, short task)")
+    day1, hw_time, hw_duration = predict_best_time(
+        task_type="hw", task_duration=1.5, hours_until_due=24, daily_free_time=4.0
     )
-    day, time, duration = result
-    print(f"Recommended time: {format_day_and_time(day, time, duration)}")
+    print(f"   Recommended time: {format_day_and_time(day1, hw_time, hw_duration)}")
 
-    # Simulate user feedback
-    was_accepted = simulate_user_preference("hw", time, day)
-    print(f"User {'accepted' if was_accepted else 'rejected'} the recommendation")
+    # Simulate user accepting or rejecting the recommendation
+    hw_accepted = simulate_user_preference("hw", hw_time, day1)
+    print(f"   User {'accepted' if hw_accepted else 'rejected'} the recommendation")
+    print()
 
-    # Record feedback
-    record_binary_feedback(
-        task_type="hw",
-        task_duration=1.5,
-        hours_until_due=48,
-        daily_free_time=6.0,
-        chosen_time=time,
-        day_of_week=day,
-        was_accepted=was_accepted,
+    # Example 2: Social task (meeting in 3 days)
+    print("👥 Example 2: Meeting in 3 days (medium urgency)")
+    day2, meeting_time, meeting_duration = predict_best_time(
+        task_type="meeting", task_duration=1.0, hours_until_due=72, daily_free_time=4.0
+    )
+    print(
+        f"   Recommended time: {format_day_and_time(day2, meeting_time, meeting_duration)}"
     )
 
-    # If rejected, get an alternative recommendation
-    if not was_accepted:
-        print("\n🔄 Getting alternative recommendation...")
-        result = generate_recommendations(
-            task_type="hw", task_duration=1.5, hours_until_due=48, daily_free_time=6.0
-        )
-        day, time, duration = result
-        print(f"Alternative recommendation: {format_day_and_time(day, time, duration)}")
-
-        # Simulate user feedback for the alternative
-        was_accepted = simulate_user_preference("hw", time, day)
-        print(f"User {'accepted' if was_accepted else 'rejected'} the alternative")
-
-        # Record feedback for the alternative
-        record_binary_feedback(
-            task_type="hw",
-            task_duration=1.5,
-            hours_until_due=48,
-            daily_free_time=6.0,
-            chosen_time=time,
-            day_of_week=day,
-            was_accepted=was_accepted,
-        )
-
-    # Example 2: Medium task (meeting)
-    print("\n👥 Example 2: Medium task (meeting)")
-    print("----------------------------------")
-    result = generate_recommendations(
-        task_type="meeting", task_duration=2.0, hours_until_due=72, daily_free_time=8.0
+    # Simulate user accepting or rejecting the recommendation
+    meeting_accepted = simulate_user_preference("meeting", meeting_time, day2)
+    print(
+        f"   User {'accepted' if meeting_accepted else 'rejected'} the recommendation"
     )
-    day, time, duration = result
-    print(f"Recommended time: {format_day_and_time(day, time, duration)}")
+    print()
 
-    # Simulate user feedback
-    was_accepted = simulate_user_preference("meeting", time, day)
-    print(f"User {'accepted' if was_accepted else 'rejected'} the recommendation")
-
-    # Record feedback
-    record_binary_feedback(
-        task_type="meeting",
-        task_duration=2.0,
-        hours_until_due=72,
-        daily_free_time=8.0,
-        chosen_time=time,
-        day_of_week=day,
-        was_accepted=was_accepted,
+    # Example 3: School task (project due in 7 days)
+    # First, try with splitting (prefer_splitting=True)
+    print(
+        "📊 Example 3a: Project due in 7 days (long task, low urgency) - With splitting"
     )
-
-    # Example 3: Long task with splitting (project work)
-    print("\n💻 Example 3: Long task with splitting (project work)")
-    print("--------------------------------------------------")
-    recommendations = generate_recommendations(
+    project_recommendations = generate_recommendations(
         task_type="project",
         task_duration=6.0,
-        hours_until_due=120,
-        daily_free_time=8.0,
+        hours_until_due=168,
+        daily_free_time=4.0,
         prefer_splitting=True,
     )
+    print("   Recommended times (split across multiple sessions):")
+    for i, (day, time, duration) in enumerate(project_recommendations):
+        print(f"   Session {i+1}: {format_day_and_time(day, time, duration)}")
 
-    print("Recommended times:")
-    for i, (day, time, duration) in enumerate(recommendations, 1):
-        print(f"  {i}. {format_day_and_time(day, time, duration)}")
-
-    # Simulate user feedback for each recommendation
-    for i, (day, time, duration) in enumerate(recommendations, 1):
-        was_accepted = simulate_user_preference(
-            "project", time, day, prefer_splitting=True
+    # Simulate user accepting or rejecting each session
+    project_accepted = []
+    for day, time, duration in project_recommendations:
+        accepted = simulate_user_preference("project", time, day, prefer_splitting=True)
+        project_accepted.append(accepted)
+        print(
+            f"   User {'accepted' if accepted else 'rejected'} session {len(project_accepted)}"
         )
-        print(f"User {'accepted' if was_accepted else 'rejected'} recommendation {i}")
+    print()
 
-        # Record feedback
+    # Example 4: Health & Fitness task (workout)
+    print("💪 Example 4: Workout (Health & Fitness category)")
+    day4, workout_time, workout_duration = predict_best_time(
+        task_type="workout", task_duration=1.0, hours_until_due=48, daily_free_time=4.0
+    )
+    print(
+        f"   Recommended time: {format_day_and_time(day4, workout_time, workout_duration)}"
+    )
+
+    # Simulate user accepting or rejecting the recommendation
+    workout_accepted = simulate_user_preference("workout", workout_time, day4)
+    print(
+        f"   User {'accepted' if workout_accepted else 'rejected'} the recommendation"
+    )
+    print()
+
+    # Record feedback for all examples
+    print("3️⃣ Recording feedback...\n")
+
+    # Record feedback for homework
+    record_binary_feedback(
+        task_type="hw",
+        task_duration=hw_duration,
+        hours_until_due=24,
+        daily_free_time=4.0,
+        chosen_time=hw_time,
+        day_of_week=day1,
+        was_accepted=hw_accepted,
+    )
+
+    # Record feedback for meeting
+    record_binary_feedback(
+        task_type="meeting",
+        task_duration=meeting_duration,
+        hours_until_due=72,
+        daily_free_time=4.0,
+        chosen_time=meeting_time,
+        day_of_week=day2,
+        was_accepted=meeting_accepted,
+    )
+
+    # Record feedback for project sessions (with splitting)
+    for i, ((day, time, duration), accepted) in enumerate(
+        zip(project_recommendations, project_accepted)
+    ):
         record_binary_feedback(
             task_type="project",
             task_duration=duration,
-            hours_until_due=120
-            - (i - 1) * 24,  # Adjust hours until due for later sessions
-            daily_free_time=8.0,
+            hours_until_due=168 - (i * 24),  # Adjust hours until due for later sessions
+            daily_free_time=4.0,
             chosen_time=time,
             day_of_week=day,
-            was_accepted=was_accepted,
+            was_accepted=accepted,
         )
 
-    # Example 4: Workout (considering scheduled events)
-    print("\n💪 Example 4: Workout (considering scheduled events)")
-    print("-----------------------------------------------")
-    day, time, duration = generate_recommendations(
-        task_type="workout", task_duration=1.0, hours_until_due=24, daily_free_time=4.0
-    )
-    print(f"Recommended time: {format_day_and_time(day, time, duration)}")
-
-    # Simulate user feedback
-    was_accepted = simulate_user_preference("workout", time, day)
-    print(f"User {'accepted' if was_accepted else 'rejected'} the recommendation")
-
-    # Record feedback
+    # Record feedback for workout
     record_binary_feedback(
         task_type="workout",
-        task_duration=1.0,
+        task_duration=workout_duration,
+        hours_until_due=48,
+        daily_free_time=4.0,
+        chosen_time=workout_time,
+        day_of_week=day4,
+        was_accepted=workout_accepted,
+    )
+
+    # Update the model with feedback
+    print("\n4️⃣ Updating the model with feedback...")
+
+    # Create training examples and update model for each feedback
+    # Homework
+    hw_example = create_training_example(
+        task_type="hw",
+        task_duration=hw_duration,
         hours_until_due=24,
         daily_free_time=4.0,
-        chosen_time=time,
-        day_of_week=day,
-        was_accepted=was_accepted,
+        chosen_time=hw_time,
+        day_of_week=day1,
+        actual_time=(
+            hw_time if hw_accepted else hw_time + 12.0
+        ),  # Use a different time for rejected recommendations
+    )
+    update_model(hw_example, 0.0 if hw_accepted else 1.0)
+
+    # Meeting
+    meeting_example = create_training_example(
+        task_type="meeting",
+        task_duration=meeting_duration,
+        hours_until_due=72,
+        daily_free_time=4.0,
+        chosen_time=meeting_time,
+        day_of_week=day2,
+        actual_time=(
+            meeting_time if meeting_accepted else meeting_time + 12.0
+        ),  # Use a different time for rejected recommendations
+    )
+    update_model(meeting_example, 0.0 if meeting_accepted else 1.0)
+
+    # Project sessions
+    for i, ((day, time, duration), accepted) in enumerate(
+        zip(project_recommendations, project_accepted)
+    ):
+        project_example = create_training_example(
+            task_type="project",
+            task_duration=duration,
+            hours_until_due=168 - (i * 24),
+            daily_free_time=4.0,
+            chosen_time=time,
+            day_of_week=day,
+            actual_time=(
+                time if accepted else time + 12.0
+            ),  # Use a different time for rejected recommendations
+        )
+        update_model(project_example, 0.0 if accepted else 1.0)
+
+    # Workout
+    workout_example = create_training_example(
+        task_type="workout",
+        task_duration=workout_duration,
+        hours_until_due=48,
+        daily_free_time=4.0,
+        chosen_time=workout_time,
+        day_of_week=day4,
+        actual_time=(
+            workout_time if workout_accepted else workout_time + 12.0
+        ),  # Use a different time for rejected recommendations
+    )
+    update_model(workout_example, 0.0 if workout_accepted else 1.0)
+
+    # Second round of recommendations (after feedback)
+    print("\n5️⃣ Second round of recommendations (after feedback)...\n")
+    reset_recommended_times()
+
+    # Example 1: School task (homework due tomorrow)
+    print("📚 Example 1: Homework due tomorrow (urgent, short task)")
+    day1_2, hw_time_2, hw_duration_2 = predict_best_time(
+        task_type="hw", task_duration=1.5, hours_until_due=24, daily_free_time=4.0
+    )
+    print(
+        f"   Recommended time: {format_day_and_time(day1_2, hw_time_2, hw_duration_2)}"
     )
 
-    # Update the model with all the feedback
-    print("\n🔄 Updating model with feedback...")
-    # Since we've already recorded all the feedback using record_binary_feedback,
-    # we don't need to pass additional examples to update_model
-    # The update_model function will process the feedback file that was created
-    update_model(
-        "", 0
-    )  # Pass empty example and zero cost as we've already recorded all feedback
+    # Simulate user accepting or rejecting the recommendation
+    hw_accepted_2 = simulate_user_preference("hw", hw_time_2, day1_2)
+    print(f"   User {'accepted' if hw_accepted_2 else 'rejected'} the recommendation")
+    print()
 
-    # Show how recommendations improve after feedback
-    print("\n📊 Showing improved recommendations after feedback")
-    print("---------------------------------------------")
-
-    # Example 5: Homework after feedback
-    print("\n📝 Example 5: Homework after feedback")
-    print("----------------------------------")
-    day, time, duration = generate_recommendations(
-        task_type="hw", task_duration=1.5, hours_until_due=48, daily_free_time=6.0
+    # Example 2: Social task (meeting in 3 days)
+    print("👥 Example 2: Meeting in 3 days (medium urgency)")
+    day2_2, meeting_time_2, meeting_duration_2 = predict_best_time(
+        task_type="meeting", task_duration=1.0, hours_until_due=72, daily_free_time=4.0
     )
-    print(f"Recommended time: {format_day_and_time(day, time, duration)}")
-
-    # Example 6: Meeting after feedback
-    print("\n👥 Example 6: Meeting after feedback")
-    print("----------------------------------")
-    day, time, duration = generate_recommendations(
-        task_type="meeting", task_duration=2.0, hours_until_due=72, daily_free_time=8.0
+    print(
+        f"   Recommended time: {format_day_and_time(day2_2, meeting_time_2, meeting_duration_2)}"
     )
-    print(f"Recommended time: {format_day_and_time(day, time, duration)}")
 
-    # Example 7: Project work after feedback (with splitting)
-    print("\n💻 Example 7: Project work after feedback (with splitting)")
-    print("--------------------------------------------------")
-    recommendations = generate_recommendations(
+    # Simulate user accepting or rejecting the recommendation
+    meeting_accepted_2 = simulate_user_preference("meeting", meeting_time_2, day2_2)
+    print(
+        f"   User {'accepted' if meeting_accepted_2 else 'rejected'} the recommendation"
+    )
+    print()
+
+    # Example 3: School task (project due in 7 days)
+    # First, try with splitting (prefer_splitting=True)
+    print(
+        "📊 Example 3a: Project due in 7 days (long task, low urgency) - With splitting"
+    )
+    project_recommendations_2 = generate_recommendations(
         task_type="project",
         task_duration=6.0,
-        hours_until_due=120,
-        daily_free_time=8.0,
+        hours_until_due=168,
+        daily_free_time=4.0,
         prefer_splitting=True,
     )
+    print("   Recommended times (split across multiple sessions):")
+    for i, (day, time, duration) in enumerate(project_recommendations_2):
+        print(f"   Session {i+1}: {format_day_and_time(day, time, duration)}")
 
-    print("Recommended times:")
-    for i, (day, time, duration) in enumerate(recommendations, 1):
-        print(f"  {i}. {format_day_and_time(day, time, duration)}")
+    # Simulate user accepting or rejecting each session
+    project_accepted_2 = []
+    for day, time, duration in project_recommendations_2:
+        accepted = simulate_user_preference("project", time, day, prefer_splitting=True)
+        project_accepted_2.append(accepted)
+        print(
+            f"   User {'accepted' if accepted else 'rejected'} session {len(project_accepted_2)}"
+        )
+    print()
 
-    # Example 8: Workout after feedback
-    print("\n💪 Example 8: Workout after feedback")
-    print("-----------------------------------------------")
-    day, time, duration = generate_recommendations(
-        task_type="workout", task_duration=1.0, hours_until_due=24, daily_free_time=4.0
+    # Example 4: Health & Fitness task (workout)
+    print("💪 Example 4: Workout (Health & Fitness category)")
+    day4_2, workout_time_2, workout_duration_2 = predict_best_time(
+        task_type="workout", task_duration=1.0, hours_until_due=48, daily_free_time=4.0
     )
-    print(f"Recommended time: {format_day_and_time(day, time, duration)}")
+    print(
+        f"   Recommended time: {format_day_and_time(day4_2, workout_time_2, workout_duration_2)}"
+    )
 
-    print("\n✅ Binary feedback demo completed")
+    # Simulate user accepting or rejecting the recommendation
+    workout_accepted_2 = simulate_user_preference("workout", workout_time_2, day4_2)
+    print(
+        f"   User {'accepted' if workout_accepted_2 else 'rejected'} the recommendation"
+    )
+    print()
 
 
 if __name__ == "__main__":

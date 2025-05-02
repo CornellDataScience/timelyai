@@ -65,10 +65,12 @@ function renderTasks(tasks) {
 function createTaskElement(task) {
     const div = document.createElement('div');
     div.className = 'task-item';
+    div.setAttribute('data-task-id', task.id);
     div.innerHTML = `
         <div class="task-info">
             <div class="task-type">${task.type}</div>
             <div class="task-duration">${formatDuration(task.duration)}</div>
+            <div class="task-due-date" style="display: none;">${task.dueDate}</div>
         </div>
         <div class="task-actions">
             <button class="secondary-btn" onclick="getRecommendations('${task.id}')">Get Times</button>
@@ -160,13 +162,47 @@ function createScheduleElement(item) {
 // Recommendations
 async function getRecommendations(taskId) {
     try {
-        const response = await fetch(`http://localhost:5000/api/recommendations/${taskId}`);
-        const recommendations = await response.json();
+        // Get task details from the task list
+        const taskElement = document.querySelector(`[data-task-id="${taskId}"]`);
+        if (!taskElement) {
+            throw new Error('Task not found in UI');
+        }
 
+        const taskType = taskElement.querySelector('.task-type').textContent;
+        const taskDuration = parseFloat(taskElement.querySelector('.task-duration').textContent);
+        const dueDate = taskElement.querySelector('.task-due-date')?.textContent || '';
+
+        // Calculate hours until due
+        const hoursUntilDue = dueDate ?
+            (new Date(dueDate) - new Date()) / (1000 * 60 * 60) :
+            24.0;
+
+        const response = await fetch('http://localhost:5000/api/generate-recs', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                userId: localStorage.getItem('userId'), // Make sure this is set during login
+                taskId: taskId,
+                taskType: taskType,
+                taskDuration: taskDuration,
+                hoursUntilDue: hoursUntilDue,
+                dailyFreeTime: 4.0, // Default value, could be made configurable
+                preferSplitting: false // Default value, could be made configurable
+            })
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.message || 'Failed to get recommendations');
+        }
+
+        const data = await response.json();
         currentTask = taskId;
-        currentRecommendations = recommendations;
+        currentRecommendations = data.recommendations;
 
-        showRecommendationsModal(recommendations);
+        showRecommendationsModal(data.recommendations);
     } catch (error) {
         console.error('Error getting recommendations:', error);
         showError('Failed to get recommendations');

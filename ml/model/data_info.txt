@@ -33,13 +33,12 @@ For prediction examples (no feedback):
 Each example includes the following features:
 
 1. `event_type` - Type of task (e.g., "hw", "meeting", "reading", "project")
-2. `category_X` - Category feature (e.g., "category_school", "category_social")
-3. `task_duration` - Expected duration in hours
-4. `hours_until_due` - Hours until the task is due
-5. `daily_free_time` - Available free time in the day
-6. `day_of_week` - Day of the week (0=Monday, 6=Sunday)
-7. `is_weekend` - Binary indicator if the day is a weekend (1) or weekday (0)
-8. `time_of_day` - Current time of day in 24-hour format with decimal hours
+2. `task_duration` - Expected duration in hours
+3. `hours_until_due` - Hours until the task is due
+4. `daily_free_time` - Available free time in the day
+5. `day_of_week` - Day of the week (0=Monday, 6=Sunday)
+6. `is_weekend` - Binary indicator if the day is a weekend (1) or weekday (0)
+7. `time_of_day` - Current time of day in 24-hour format with decimal hours
 
 ## Event Categories
 
@@ -108,13 +107,13 @@ Each action is represented by an index (0-32) corresponding to a specific time s
 Training examples include feedback on how well a recommendation worked:
 
 ```
-action_index:cost:probability | event_type=hw task_duration=1.5 hours_until_due=24 daily_free_time=4.0 day_of_week=2 is_weekend=0 time_of_day=14.5 category_school=1
+action_index:cost:probability | event_type=hw task_duration=1.5 hours_until_due=24 daily_free_time=4.0 day_of_week=2 is_weekend=0 time_of_day=14.5
 ```
 
 Where:
 - `action_index` - The index of the chosen time slot
-- `cost` - The cost/reward (lower is better, normalized to [0,1])
-- `probability` - The probability of the action (for importance sampling)
+- `cost` - The cost/reward (0=good, 1=bad)
+- `probability` - The probability of the action (20% of week for this task)
 - Features are in `name=value` format
 
 ## Prediction Data Format
@@ -122,7 +121,7 @@ Where:
 Prediction examples omit the action, cost, and probability:
 
 ```
-| event_type=hw task_duration=1.5 hours_until_due=24 daily_free_time=4.0 day_of_week=2 is_weekend=0 time_of_day=14.5 category_school=1
+| event_type=hw task_duration=1.5 hours_until_due=24 daily_free_time=4.0 day_of_week=2 is_weekend=0 time_of_day=14.5
 ```
 
 ## Feedback Data Format
@@ -130,7 +129,7 @@ Prediction examples omit the action, cost, and probability:
 Feedback data follows the same format as training data but is collected separately for incremental model updates:
 
 ```
-action_index:cost:probability | event_type=hw task_duration=1.5 hours_until_due=24 daily_free_time=4.0 day_of_week=2 is_weekend=0 time_of_day=14.5 category_school=1
+action_index:cost:probability | event_type=hw task_duration=1.5 hours_until_due=24 daily_free_time=4.0 day_of_week=2 is_weekend=0 time_of_day=14.5
 ```
 
 ## Cost Calculation
@@ -161,6 +160,19 @@ This creates a clear signal for the model to learn from:
 - 0.0 = Accepted recommendation
 - 1.0 = Rejected recommendation
 
+## Probability Calculation
+
+The probability is calculated as 20% of the week for the task:
+
+```
+probability = (task_duration / total_weekly_hours) * 0.2
+```
+
+Where:
+- `task_duration` is the expected duration in hours
+- `total_weekly_hours` is the total available hours in a week (16 hours per day * 7 days = 112 hours)
+- The result is multiplied by 0.2 to get 20% of the week
+
 ## Alternative Recommendations
 
 When a user rejects a recommendation, the system can provide an alternative time slot:
@@ -183,27 +195,27 @@ For long tasks (duration > 3 hours), the system splits them into multiple sessio
 
 ### Training Example with Continuous Feedback
 ```
-5:0.25:0.8 | event_type=hw task_duration=1.5 hours_until_due=24 daily_free_time=4.0 day_of_week=2 is_weekend=0 time_of_day=14.5 category_school=1
+5:0.25:0.1 | event_type=hw task_duration=1.5 hours_until_due=24 daily_free_time=4.0 day_of_week=2 is_weekend=0 time_of_day=14.5
 ```
 This example indicates:
 - Action 5 (9:00 AM) was chosen
 - Cost was 0.25 (completed 6 hours away from recommended time)
-- Probability was 0.8
+- Probability was 0.1 (1.5 hours is about 10% of 20% of the week)
 - Task was homework, 1.5 hours long, due in 24 hours, with 4 hours of free time, on Wednesday
 
 ### Training Example with Binary Feedback
 ```
-5:0.0:0.8 | event_type=hw task_duration=1.5 hours_until_due=24 daily_free_time=4.0 day_of_week=2 is_weekend=0 time_of_day=14.5 category_school=1
+5:0.0:0.1 | event_type=hw task_duration=1.5 hours_until_due=24 daily_free_time=4.0 day_of_week=2 is_weekend=0 time_of_day=14.5
 ```
 This example indicates:
 - Action 5 (9:00 AM) was chosen
 - Cost was 0.0 (recommendation was accepted)
-- Probability was 0.8
+- Probability was 0.1 (1.5 hours is about 10% of 20% of the week)
 - Task was homework, 1.5 hours long, due in 24 hours, with 4 hours of free time, on Wednesday
 
 ### Prediction Example
 ```
-| event_type=meeting task_duration=1.0 hours_until_due=72 daily_free_time=4.0 day_of_week=3 is_weekend=0 time_of_day=15.0 category_social=1
+| event_type=meeting task_duration=1.0 hours_until_due=72 daily_free_time=4.0 day_of_week=3 is_weekend=0 time_of_day=15.0
 ```
 This example requests a prediction for:
 - A meeting, 1 hour long, due in 72 hours, with 4 hours of free time, on Thursday 

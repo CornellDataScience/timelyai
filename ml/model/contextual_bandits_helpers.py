@@ -1,7 +1,7 @@
 import numpy as np
 from datetime import datetime
 from typing import Dict, List, Tuple, Union, Optional
-from event_categories import get_category_for_event_type
+from .event_categories import get_category_for_event_type
 
 # Constants for time recommendations
 START_HOUR = 6  # 6 AM
@@ -29,9 +29,9 @@ def format_vw_example(
 
     Args:
         features: Dictionary of feature names and values
-        action: Index of the chosen action
-        cost: Cost/reward for the action (optional)
-        probability: Probability of the action (optional)
+        action: Index of the chosen action (time slot)
+        cost: Cost/reward for the action (0=good, 1=bad)
+        probability: Probability of the action (20% of week for this task)
 
     Returns:
         Formatted VW example string
@@ -113,7 +113,7 @@ def create_training_example(
         chosen_time: The time slot that was chosen
         actual_time: The actual time the task was completed
         day_of_week: Day of the week (0=Monday, 6=Sunday)
-        probability: The probability of the action (optional)
+        probability: The probability of the action (20% of week for this task)
 
     Returns:
         Formatted VW example string
@@ -122,7 +122,6 @@ def create_training_example(
     chosen_slot = min(TIME_SLOTS, key=lambda x: abs(x - chosen_time))
 
     # Find the index of the chosen slot in TIME_SLOTS
-    # Use a more robust method to find the index
     slot_index = 0
     for i, slot in enumerate(TIME_SLOTS):
         if abs(slot - chosen_slot) < 0.01:  # Use a small epsilon for float comparison
@@ -132,18 +131,9 @@ def create_training_example(
     # Calculate cost based on the difference between chosen and actual time
     cost = abs(chosen_time - actual_time) / 24.0  # Normalize to [0, 1]
 
-    # Get category information for the task type
-    category = get_category_for_event_type(task_type)
-    category_feature = (
-        f"category_{category.lower().replace(' & ', '_').replace(' ', '_')}"
-        if category
-        else "category_unknown"
-    )
-
     # Create features
     features = {
         "event_type": task_type,
-        category_feature: 1,  # Add category as a feature
         "task_duration": task_duration,
         "hours_until_due": hours_until_due,
         "daily_free_time": daily_free_time,
@@ -176,18 +166,9 @@ def create_prediction_example(
     Returns:
         Formatted VW example string
     """
-    # Get category information for the task type
-    category = get_category_for_event_type(task_type)
-    category_feature = (
-        f"category_{category.lower().replace(' & ', '_').replace(' ', '_')}"
-        if category
-        else "category_unknown"
-    )
-
     # Create features
     features = {
         "event_type": task_type,
-        category_feature: 1,  # Add category as a feature
         "task_duration": task_duration,
         "hours_until_due": hours_until_due,
         "daily_free_time": daily_free_time,
