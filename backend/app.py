@@ -5,6 +5,7 @@ import os
 import json
 import traceback
 import sys
+import math
 
 # Add the parent directory to Python path
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -536,6 +537,8 @@ def process_feedback_webhook():
         print("  ⚠️  Already handled this response")
         return ("", 200)
 
+    # Comment out feedback processing for now
+    """
     cost = 0.0 if resp == "accepted" else 1.0
     print(f"  • Providing feedback with cost: {cost}")
 
@@ -548,6 +551,7 @@ def process_feedback_webhook():
         cost=cost,
         prob=ctx["prob"],
     )
+    """
 
     # mark this invite as "handled" so you don't double-count
     db.collection("InviteTracking").document(event_id).update(
@@ -723,7 +727,9 @@ def generate_recommendations_endpoint():
                 )
 
                 # Remove the hours we just used from the *free* list
-                used_range = range(offset_h, offset_h + int(dur))
+                used_range = range(
+                    offset_h, offset_h + math.ceil(dur)
+                )  # Round up to nearest hour
                 candidate_hours = [h for h in candidate_hours if h not in used_range]
 
                 remaining -= dur  # update for this task
@@ -759,15 +765,77 @@ def generate_recommendations_endpoint():
 
         print("\n📅 Final Schedule:")
         print("=" * 50)
+        schedule_details = []  # List to store schedule details for popup
         for i, (task_id, summary, start_dt, dur) in enumerate(all_recs, 1):
             print(f"{i}. {summary}")
             print(f"   • Start: {start_dt.strftime('%Y-%m-%d %H:%M')}")
             print(f"   • Duration: {dur:.1f}h")
             print(f"   • Task ID: {task_id}")
 
-        print(f"\n✨ Generated {len(links)} invite(s)")
-        return jsonify({"links": links})
+            # Add to schedule details for popup
+            schedule_details.append(
+                {
+                    "title": summary,
+                    "start": start_dt.strftime("%Y-%m-%d %H:%M"),
+                    "duration": f"{dur:.1f}h",
+                    "taskId": task_id,
+                }
+            )
 
+        print(f"\n✨ Generated {len(links)} invite(s)")
+
+        # Check if we have any recommendations after processing all tasks
+        if len(schedule_details) == 0:
+            print("⚠️ No recommendations generated")
+            return (
+                jsonify(
+                    {
+                        "error": "No recommendations could be generated for your tasks.",
+                        "status": "no_recommendations",
+                    }
+                ),
+                200,
+            )
+
+        # Return both links and schedule details
+        return jsonify(
+            {
+                "links": links,
+                "schedule": schedule_details,
+                "status": "success",
+                "showSchedule": True,  # Flag to indicate schedule should be shown
+            }
+        )
+
+    except HttpError as err:
+        if "quotaExceeded" in str(err):
+            print("⚠️ Calendar quota exceeded - returning schedule details only")
+            # If we have schedule details, return them
+            if "schedule_details" in locals() and schedule_details:
+                return (
+                    jsonify(
+                        {
+                            "error": "Calendar quota exceeded. Please try again later.",
+                            "schedule": schedule_details,
+                            "status": "quota_exceeded",
+                            "showSchedule": True,  # Flag to indicate schedule should be shown
+                        }
+                    ),
+                    429,
+                )
+            else:
+                return (
+                    jsonify(
+                        {
+                            "error": "Calendar quota exceeded. Please try again later.",
+                            "status": "quota_exceeded",
+                        }
+                    ),
+                    429,
+                )
+        else:
+            print("❌ Google Calendar API error:", err)
+            return jsonify({"error": str(err)}), 500
     except Exception as err:
         print("❌ Error in recommendation generation:", err)
         traceback.print_exc()
