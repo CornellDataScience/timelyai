@@ -1,16 +1,10 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-from firestoreAPI import firestore_module as FB
-from datetime import datetime
-import json
-from flask import request, jsonify
-from googleCalendarAPI.googleCalendarAPI import GoogleCalendar
-from datetime import datetime, timedelta, time as dtime
-import pytz
+from datetime import datetime, timedelta
 import os
+import json
+import traceback
 import sys
-import random
-import atexit
 
 # Add the parent directory to Python path
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -20,18 +14,61 @@ sys.path.append(timelyai_dir)
 sys.path.append(os.path.join(timelyai_dir, "ml"))
 sys.path.append(os.path.join(timelyai_dir, "ml", "model"))
 
-# Now we can import the VW bandit
+from google.oauth2.credentials import Credentials
+from googleapiclient.discovery import build
+from google.oauth2 import service_account
+from google_auth_oauthlib.flow import InstalledAppFlow
+from google.auth.transport.requests import Request
+from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
+import pytz
+import firestoreAPI.firestore_module as FB
 from model.vw_bandit import vw_recommend, vw_feedback, save_model
+from googleCalendarAPI.googleCalendarAPI import GoogleCalendar
+import atexit
 
 # Register model save on exit
 atexit.register(save_model)
 
-TOKEN_DIR = os.path.join(project_root, "timelyai/token.json")
-CREDS_JSON = os.path.join(project_root, "timelyai/user_credentials.json")
-tz = pytz.timezone("America/New_York")
-
 app = Flask(__name__)
 CORS(app)
+
+# Get the project root directory
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# Google Calendar API setup
+SCOPES = ["https://www.googleapis.com/auth/calendar"]
+USER_CREDS_JSON = os.path.join(project_root, "user_calendar_credentials.json")
+TIMELY_TOKEN_JSON = os.path.join(project_root, "timely_calendar_token.json")
+TIMELY_CREDS_JSON = os.path.join(project_root, "timely_calendar_credentials.json")
+
+# Initialize Firestore
+db = FB.initializeDB()
+
+# Timezone setup
+TZ = pytz.timezone("America/New_York")
+
+USER_TOKEN_DIR = os.path.join(project_root, "token.json")
+USER_CREDS_JSON = os.path.join(project_root, "user_credentials.json")
+
+# Remove duplicate definitions
+# TIMELY_TOKEN_DIR = os.path.join(project_root, "timely_calendar_token.json")
+# TIMLEY_CREDS_JSON = os.path.join(project_root, "timely_calendar_credentials.json")
+
+tz = pytz.timezone("America/New_York")
+
+
+def get_timely_calendar_service():
+    """Returns a Google Calendar API service instance for TimelyAI's calendar."""
+    if not os.path.exists(TIMELY_TOKEN_JSON):
+        print(f"❌ Timely token file not found at: {TIMELY_TOKEN_JSON}")
+        raise FileNotFoundError(f"Timely token file not found at: {TIMELY_TOKEN_JSON}")
+
+    creds = Credentials.from_authorized_user_file(
+        TIMELY_TOKEN_JSON,
+        ["https://www.googleapis.com/auth/calendar"],
+    )
+    return build("calendar", "v3", credentials=creds)
 
 
 @app.route("/api/tasks", methods=["POST"])
@@ -40,7 +77,6 @@ def add_task():
     userId = data.get("userId")
     task = data.get("taskDetails")
 
-    db = FB.initializeDB()
     task_id = FB.addTask(
         db, userId, task["title"], task["duration"], task["category"], task["dueDate"]
     )
@@ -73,7 +109,6 @@ def add_task():
 @app.route("/api/tasks", methods=["GET"])
 def get_tasks():
     user_id = request.args.get("userId")
-    db = FB.initializeDB()
     doc_ref = db.collection("UserTasks").document(user_id)
     doc = doc_ref.get()
 
@@ -106,7 +141,6 @@ def save_goals():
     if not user_id or not goals:
         return jsonify({"status": "error", "message": "Missing userId or goals"}), 400
 
-    db = FB.initializeDB()
     doc_ref = db.collection("UserPreferences").document(user_id)
 
     try:
@@ -123,7 +157,6 @@ def load_goals():
     if not user_id:
         return jsonify({"status": "error", "message": "Missing userId"}), 400
 
-    db = FB.initializeDB()
     doc_ref = db.collection("UserPreferences").document(user_id)
 
     try:
@@ -361,218 +394,397 @@ def save_scheduled_slot(uid, task_id, start_dt, end_dt, db):
     )
 
 
+def start_calendar_watch(timely_gcal, webhook_url):
+    """Set up Calendar push notifications to receive event updates."""
+    # Generate a unique channel ID using timestamp
+    channel_id = f"timely-ai-chan-{int(datetime.now().timestamp())}"
+
+    body = {
+        "id": channel_id,  # unique channel ID
+        "type": "web_hook",
+        "address": webhook_url,  # e.g. https://mydomain.com/api/calendar-webhook
+        "params": {"ttl": "86400"},  # how long before you need to renew (in seconds)
+    }
+
+    print(f"🔄 Setting up calendar watch with channel ID: {channel_id}")
+    return timely_gcal.events().watch(calendarId="primary", body=body).execute()
+
+
+def send_invite_via_timely(
+    timely_gcal,
+    title,
+    start_dt,
+    dur,
+    user_email,
+    task_id,
+    task_type,
+    hrs_until_due,
+    chosen_hour,
+    prob,
+):
+    """
+    Insert the event on TimelyAI's calendar and e‑mail the invite.
+    Returns htmlLink (string) or None.
+    """
+    if start_dt.tzinfo is None:
+        start_dt = TZ.localize(start_dt)
+    end_dt = start_dt + timedelta(hours=dur)
+
+    body = {
+        "summary": title,
+        "description": f"TimelyAI scheduled task «{title}»",
+        "start": {"dateTime": start_dt.isoformat()},
+        "end": {"dateTime": end_dt.isoformat()},
+        "attendees": [{"email": user_email}],
+        "extendedProperties": {
+            "private": {
+                "taskId": task_id,
+                "scheduledAt": datetime.now(TZ).isoformat(),
+            }
+        },
+    }
+
+    try:
+        ev = (
+            timely_gcal.events()
+            .insert(calendarId="primary", body=body, sendUpdates="none")
+            .execute()
+        )
+
+        # --- store model context for when the user responds ---
+        db.collection("InviteTracking").document(ev["id"]).set(
+            {
+                "taskId": task_id,
+                "taskType": task_type,
+                "chunkDuration": dur,
+                "hrsUntilDue": hrs_until_due,
+                "dayOfWeek": datetime.now(TZ).weekday(),
+                "chosenHour": chosen_hour,
+                "prob": prob,
+                "handled": False,
+                "createdAt": datetime.now(TZ).isoformat(),
+            }
+        )
+
+        return ev.get("htmlLink"), ev.get("id")
+    except Exception:
+        traceback.print_exc()
+        return None, None
+
+
+@app.route("/api/calendar-webhook", methods=["POST"])
+def process_feedback_webhook():
+    """
+    Receives push notifications from Google Calendar.
+    When an invite is accepted or declined, we fetch the event,
+    look up our stored context, and send a positive or negative reward.
+    """
+    print("\n📨 Received calendar webhook notification")
+
+    # Google will send a bare notification; the headers carry the resource ID:
+    channel_id = request.headers.get("X-Goog-Channel-ID")
+    resource_id = request.headers.get("X-Goog-Resource-ID")  # calendarId
+    resource_uri = request.headers.get("X-Goog-Resource-URI")  # includes ?eventId=...
+
+    print(f"  • Channel ID: {channel_id}")
+    print(f"  • Resource ID: {resource_id}")
+    print(f"  • Resource URI: {resource_uri}")
+
+    # Extract the eventId from resource_uri query-string
+    from urllib.parse import urlparse, parse_qs
+
+    event_id = parse_qs(urlparse(resource_uri).query).get("eventId", [None])[0]
+    if not event_id:
+        print("  ❌ No event ID found in resource URI")
+        return ("", 400)
+
+    print(f"  • Event ID: {event_id}")
+
+    # fetch the up-to-date event from the TimelyAI calendar
+    timely_gcal = get_timely_calendar_service()
+    ev = timely_gcal.events().get(calendarId="primary", eventId=event_id).execute()
+
+    # find the attendee entry for our user
+    attendees = ev.get("attendees", [])
+    user_att = next(
+        (a for a in attendees if a.get("self") or a["email"].endswith("@cornell.edu")),
+        None,
+    )
+    if not user_att:
+        print("  ⚠️  No matching attendee found")
+        return ("", 204)
+
+    resp = user_att.get(
+        "responseStatus"
+    )  # "accepted", "declined", "tentative", or "needsAction"
+    print(f"  • Response status: {resp}")
+
+    # only reward when they explicitly accept or decline
+    if resp not in ("accepted", "declined"):
+        print("  ⚠️  Not an explicit accept/decline")
+        return ("", 204)
+
+    # load our saved context
+    doc = db.collection("InviteTracking").document(event_id).get()
+    if not doc.exists:
+        print("  ❌ No tracking context found")
+        return ("", 404)
+    ctx = doc.to_dict()
+
+    # Check if we've already handled this response
+    if ctx.get("handled", False):
+        print("  ⚠️  Already handled this response")
+        return ("", 200)
+
+    cost = 0.0 if resp == "accepted" else 1.0
+    print(f"  • Providing feedback with cost: {cost}")
+
+    vw_feedback(
+        task_type=ctx["taskType"],
+        task_duration=ctx["chunkDuration"],
+        hrs_until_due=ctx["hrsUntilDue"],
+        day_of_week=ctx["dayOfWeek"],
+        chosen_hour=ctx["chosenHour"],
+        cost=cost,
+        prob=ctx["prob"],
+    )
+
+    # mark this invite as "handled" so you don't double-count
+    db.collection("InviteTracking").document(event_id).update(
+        {
+            "handled": True,
+            "responseStatus": resp,
+            "feedbackAt": datetime.now(TZ).isoformat(),
+        }
+    )
+
+    print("  ✅ Feedback processed successfully")
+    return ("", 200)
+
+
 @app.route("/api/generate-recs", methods=["POST"])
 def generate_recommendations_endpoint():
-    print("🚀 Incoming POST to /api/generate-recommendations")
-    data = request.get_json(silent=True) or {}
-    user_id = data.get("userId")
-    if not user_id:
-        return jsonify({"status": "error", "message": "Missing userId"}), 400
+    """Generate scheduling recommendations for tasks."""
+    try:
+        print("\n🚀 Starting recommendation generation...")
+        data = request.get_json() or {}
+        print(f"📦 Received request data: {json.dumps(data, indent=2)}")
 
-    # ─── Load tasks with remaining hours ───────────────────────────────────
-    db = FB.initializeDB()
-    tasks_to_plan = load_tasks_with_remaining_hours(user_id, db)
-    if not tasks_to_plan:
-        return jsonify({"status": "error", "message": "No tasks to schedule"}), 400
-    print(f"Found {len(tasks_to_plan)} tasks with remaining hours")
+        # ------------------------------------------------------------------ #
+        # 1. Basic input
+        # ------------------------------------------------------------------ #
+        user_id = data.get("userId")
+        if not user_id:
+            return jsonify({"error": "Missing userId"}), 400
 
-    # ─── Google Calendar + existing busy slots ───────────────────────────────
-    token_path = os.path.join(os.path.dirname(TOKEN_DIR), "token.json")
-    if not os.path.exists(token_path):
-        return jsonify({"status": "error", "message": "User not authenticated"}), 401
-    gcal = GoogleCalendar(credentials_path=CREDS_JSON, token_path=token_path)
+        # ------------------------------------------------------------------ #
+        # 2. Resolve token path automatically
+        # ------------------------------------------------------------------ #
+        #  • first priority: constant USER_TOKEN_DIR (per‑user token file)
+        #  • fall‑back: ~/.config/timelyai/<user>@token.json
+        # ------------------------------------------------------------------ #
+        token_path = USER_TOKEN_DIR
+        # if not os.path.exists(token_path):
+        #     token_path = os.path.expanduser(
+        #         f"~/.config/timelyai/{user_id.replace('@', '_')}_token.json"
+        #     )
 
-    # Get busy slots from calendar and future scheduled slots
-    calendar_busy = get_busy_slots(gcal)
-    future_slots = load_future_scheduled_slots(user_id, db)
-    busy_slots = calendar_busy + future_slots
-    print(f"{len(busy_slots)} busy slots from Calendar and scheduled slots")
+        if not os.path.exists(token_path):
+            print(f"❌ OAuth token not found for {user_id}: {token_path}")
+            return (
+                jsonify(
+                    {
+                        "error": "User not authenticated",
+                        "expectedTokenPath": token_path,
+                    }
+                ),
+                401,
+            )
 
-    # Debug: Print all busy slots
-    print("\n🛑 Busy slots:")
-    for s in busy_slots:
-        print(f"  {s['start']} to {s['end']} - {s.get('title','')}")
-    print()
+        print(f"👤 userId ..... {user_id}")
+        print(f"🔑 tokenPath .. {token_path}")
 
-    # ─── Main loop over tasks ────────────────────────────────────────────────
-    all_recs = []  # [(task_id, title, start_dt, dur_hrs)]
-    now = datetime.now(TZ)
-
-    # ────── build availability vector with dynamic horizon ──────
-    max_hrs_left = max(
-        ((_due_dt(t) - now).total_seconds() / 3600) for _, t, _ in tasks_to_plan
-    )
-    horizon_hours = int(min(max_hrs_left, 720))  # ≤ 30 days
-    availability_vector = build_free_mask(now, busy_slots, horizon_hours)
-    print(f"Mask spans {horizon_hours} h; free hours = {sum(availability_vector)}")
-
-    # Build candidate hours from availability vector
-    candidate_hours = [h for h, v in enumerate(availability_vector) if v]
-    print(f"Found {len(candidate_hours)} candidate hours")
-
-    for task_id, task, remaining_hours in tasks_to_plan:
-        print(f"Processing task: {task}")
-        title = task.get("taskName", "Untitled")
-        cat = task.get("taskCategory", "general")
-        dur_hrs = min(
-            float(task.get("taskDuration", 1)), remaining_hours
-        )  # Don't schedule more than remaining
-        due_dt = _due_dt(task)
-        hrs_left = (due_dt - now).total_seconds() / 3600
-        print(
-            f"\nTask «{title}»  due in {hrs_left:.1f} h, {remaining_hours:.1f} h remaining"
+        # ------------------------------------------------------------------ #
+        # 3. Calendar clients
+        # ------------------------------------------------------------------ #
+        user_gcal = GoogleCalendar(
+            credentials_path=USER_CREDS_JSON, token_path=token_path
         )
+        timely_gcal = get_timely_calendar_service()
+        print("✅ Calendar services initialised")
 
-        if hrs_left <= dur_hrs + 1:  # must finish before deadline
-            print("  ⤷ too little time remaining, skipping")
-            continue
+        # ------------------------------------------------------------------ #
+        # 4. Load tasks, busy slots, build availability mask
+        # ------------------------------------------------------------------ #
+        tasks = load_tasks_with_remaining_hours(user_id, db)
+        calendar_busy = get_busy_slots(user_gcal)
+        future_slots = load_future_scheduled_slots(user_id, db)
+        busy_slots = calendar_busy + future_slots
 
-        # Get recommendations from VW bandit
-        recs = vw_recommend(
-            task_type=cat,
-            task_duration=dur_hrs,
-            hrs_until_due=hrs_left,
-            day_of_week=now.weekday(),
-            candidate_hours=candidate_hours,
-            top_k=6,
-            prefer_splitting=True,
-        )
+        now = datetime.now(TZ)
+        horizon = 24 * 7  # 1 week
+        free_mask = build_free_mask(now, busy_slots, horizon)
+        candidate_hours = [h for h, ok in enumerate(free_mask) if ok]
 
-        if not recs:
-            # Give negative feedback for the first candidate hour
-            if candidate_hours:
-                prob = 1.0 / len(candidate_hours)
-                vw_feedback(
-                    task_type=cat,
-                    task_duration=dur_hrs,
-                    hrs_until_due=hrs_left,
-                    day_of_week=now.weekday(),
-                    chosen_hour=candidate_hours[0],
-                    cost=1.0,  # cost 1 == bad
-                    prob=prob,
-                )
-            continue
+        if not candidate_hours:
+            print("⚠️  No free hours in the next week")
+            return jsonify({"error": "No free hours in next week"}), 409
 
-        placed = False
-        for offset_h, chunk_dur in recs:
-            start_dt = now + timedelta(hours=float(offset_h))
-            end_dt = start_dt + timedelta(hours=float(chunk_dur))
+        # ------------------------------------------------------------------ #
+        # 5. Iterate over tasks → VW recommendations → schedule ≤ needed hrs
+        # ------------------------------------------------------------------ #
+        all_recs = []  # [(task_id, summary, start_dt, dur)]
+        links = []  # List to store calendar invite links
+        now = datetime.now(TZ)
 
-            if violates_sleep(start_dt, end_dt):
-                continue
-            if slot_conflict(start_dt, end_dt, busy_slots):
-                continue
-            if end_dt > due_dt:
-                continue
-
-            # accept slot ---------------------------------------------------------
-            all_recs.append((task_id, f"⏰ {title}", start_dt, float(chunk_dur)))
-            busy_slots.append(
-                {"start": start_dt, "end": end_dt, "title": f"⏰ {title}"}
-            )
-
-            # Update remaining hours
-            new_remaining = remaining_hours - float(chunk_dur)
-            db.collection("UserTasks").document(user_id).update(
-                {f"tasks.{task_id}.remainingHours": new_remaining}
-            )
-
-            # Save to scheduled slots
-            save_scheduled_slot(user_id, task_id, start_dt, end_dt, db)
-
-            # Give positive feedback
-            prob = 1.0 / len(candidate_hours)
-            vw_feedback(
-                task_type=cat,
-                task_duration=chunk_dur,
-                hrs_until_due=hrs_left,
-                day_of_week=now.weekday(),
-                chosen_hour=offset_h,
-                cost=0.0,  # cost 0 == reward 1
-                prob=prob,
-            )
-
-            print(f"  ✓ scheduled {start_dt:%a %m-%d %H:%M} for {chunk_dur} h")
-            placed = True
-            break
-
-        if not placed:
-            print("  ⤷ no valid recommendation after exploration")
-
-    if not all_recs:
-        return jsonify({"status": "error", "message": "No valid slots"}), 409
-
-    # ─── Create Calendar events ────────────────────────────────────────────
-    print(f"Creating {len(all_recs)} events")
-    links = []
-
-    def safe_schedule(title, start_dt, dur, task_id):
-        """Return htmlLink or None."""
-        # 1. TZ-aware and rounded
-        if start_dt.tzinfo is None:
-            start_dt = TZ.localize(start_dt)
-        start_dt = start_dt.replace(second=0, microsecond=0)
-        end_dt = start_dt + timedelta(hours=dur)
-        # 2. guard: start in the past?
-        now_local = datetime.now(TZ).replace(second=0, microsecond=0)
-        if start_dt < now_local:
-            start_dt = now_local + timedelta(minutes=2)
+        def slot_ok(start_dt, dur, due_dt):
+            """
+            Return True if the proposed slice is
+              – inside the allowed day‑time window
+              – not overlapping busy slots we already know about
+              – finishing **on or before the task's deadline**
+            """
             end_dt = start_dt + timedelta(hours=dur)
-        # 3. min length 15 min
-        if end_dt <= start_dt:
-            end_dt = start_dt + timedelta(minutes=15)
+            if end_dt > due_dt:
+                return False
+            if violates_sleep(start_dt, end_dt):
+                return False
+            return slot_conflict(start_dt, end_dt, busy_slots) is None
 
-        # Create event body without custom ID
-        body = {
-            "summary": title,
-            "description": f"Timely scheduled task: {title}",
-            "start": {"dateTime": start_dt.isoformat()},
-            "end": {"dateTime": end_dt.isoformat()},
-            "colorId": "5",
-            "extendedProperties": {
-                "private": {
-                    "taskId": task_id,
-                    "scheduledAt": datetime.now(TZ).isoformat(),
-                }
-            },
-        }
+        print("\n📊 Model Recommendation Log:")
+        print("=" * 50)
 
-        try:
-            ev = (
-                gcal.service.events()
-                .insert(calendarId="primary", body=body, sendUpdates="none")
-                .execute()
+        for task_id, task, remaining in tasks:
+            print(f"\n🔄 Processing task: {task.get('taskName', 'Untitled')}")
+            print(f"  • ID: {task_id}")
+            print(f"  • Category: {task.get('taskCategory', 'default')}")
+            print(f"  • Remaining hours: {remaining:.1f}")
+
+            if remaining <= 0:
+                print("  ⏭️  Skipping - no remaining hours")
+                continue
+
+            # ── per‑task horizon and candidate list ───────────────────────
+            due_dt = _due_dt(task)  # robust TZ‑aware helper
+            max_off = int(((due_dt - now).total_seconds() / 3600) - 0.01)
+            task_hours = [h for h in candidate_hours if h <= max_off]
+
+            if not task_hours:
+                print("  ⚠️  No time left before the deadline → skipping")
+                continue
+
+            cat = task.get("taskCategory", "default")
+            print(f"  • Hours until deadline: {max_off:.1f}")
+            print(f"  • Available hours: {len(task_hours)}")
+            print(f"  • First few candidate hours: {task_hours[:5]}")
+
+            vw_slots = vw_recommend(
+                task_type=cat,
+                task_duration=remaining,
+                hrs_until_due=max_off,
+                day_of_week=now.weekday(),
+                candidate_hours=task_hours,
+                top_k=6,  # candidates – we'll screen them
+                prefer_splitting=True,
             )
-            return ev.get("htmlLink")
-        except Exception as exc:
-            # Duplicate? 409 means we already inserted it; ignore.
-            if getattr(exc, "status_code", None) == 409:
-                return None
-            traceback.print_exc()
-            return None
 
-    for task_id, summary, start_dt, d in all_recs:
-        link = safe_schedule(summary, start_dt, d, task_id)
-        if link:
-            links.append(link)
+            print(f"  📈 Model recommendations:")
+            for i, (offset_h, dur) in enumerate(
+                vw_slots, 1
+            ):  # Note: vw_recommend returns (offset, duration)
+                if remaining <= 0:
+                    print("  ⏹️  Task hours satisfied")
+                    break  # already filled this task
 
-    # Save the VW model after successful scheduling
-    save_model()
+                dur = min(dur, remaining)  # never overshoot
+                start_dt = now + timedelta(hours=offset_h)
 
-    return jsonify(
-        {
-            "status": "success",
-            "recommendations": [
-                {"title": r[1], "start": r[2].isoformat(), "duration": r[3]}
-                for r in all_recs
-            ],
-            "eventLinks": links,
-        }
-    )
+                print(
+                    f"    {i}. Start: {start_dt.strftime('%Y-%m-%d %H:%M')}, Duration: {dur:.1f}h"
+                )
+
+                if not slot_ok(start_dt, dur, due_dt):
+                    print(
+                        "    ❌ Slot rejected – conflicts, sleep window or after deadline"
+                    )
+                    continue  # try next suggestion
+
+                # ---------- accept slot -------------------------------------------
+                print(f"    ✅ Slot accepted")
+                all_recs.append(
+                    (task_id, task.get("taskName", "Untitled"), start_dt, dur)
+                )
+                busy_slots.append(
+                    {
+                        "start": start_dt,
+                        "end": start_dt + timedelta(hours=dur),
+                        "title": f"⏰ {task.get('taskName','')}",
+                    }
+                )
+
+                # Remove the hours we just used from the *free* list
+                used_range = range(offset_h, offset_h + int(dur))
+                candidate_hours = [h for h in candidate_hours if h not in used_range]
+
+                remaining -= dur  # update for this task
+
+                # Send invite with context for feedback
+                link, event_id = send_invite_via_timely(
+                    timely_gcal,
+                    task.get("taskName", "Untitled"),
+                    start_dt,
+                    dur,
+                    user_id,
+                    task_id,
+                    cat,  # task_type
+                    max_off,  # hrs_until_due
+                    offset_h,  # chosen_hour
+                    1.0,  # default probability since vw_recommend doesn't return it
+                )
+
+                if link:
+                    print(f"    📨 Created invite: {link}")
+                    links.append(link)
+                else:
+                    print(f"    ❌ Failed to create invite")
+
+                break  # stop after first accepted slice for this task
+
+            # Update remaining hours in Firestore
+            if remaining < float(task.get("taskDuration", 0)):
+                print(f"  💾 Updating remaining hours in Firestore: {remaining:.1f}h")
+                db.collection("UserTasks").document(user_id).update(
+                    {f"tasks.{task_id}.remainingHours": remaining}
+                )
+
+        print("\n📅 Final Schedule:")
+        print("=" * 50)
+        for i, (task_id, summary, start_dt, dur) in enumerate(all_recs, 1):
+            print(f"{i}. {summary}")
+            print(f"   • Start: {start_dt.strftime('%Y-%m-%d %H:%M')}")
+            print(f"   • Duration: {dur:.1f}h")
+            print(f"   • Task ID: {task_id}")
+
+        print(f"\n✨ Generated {len(links)} invite(s)")
+        return jsonify({"links": links})
+
+    except Exception as err:
+        print("❌ Error in recommendation generation:", err)
+        traceback.print_exc()
+        return jsonify({"error": str(err)}), 500
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 
 
 if __name__ == "__main__":
+    # Start calendar watch for feedback
+    webhook_url = "https://your.ngrok.io/api/calendar-webhook"  # Replace with your actual webhook URL
+    try:
+        watch_resp = start_calendar_watch(get_timely_calendar_service(), webhook_url)
+        print("✅ Calendar watch started:", watch_resp)
+    except Exception as e:
+        print("❌ Failed to start calendar watch:", str(e))
+        traceback.print_exc()  # Add traceback for better error visibility
+
     app.run(port=8888)
