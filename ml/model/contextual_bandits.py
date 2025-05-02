@@ -58,10 +58,13 @@ class Bandit:
             self.estimates[key] = 0.0
         return self.estimates[key]
 
-    def learn(self, context, reward):
-        # Simple update rule - can be made more sophisticated
-        for action in range(24):  # 24 hours
-            key = (str(context), action)
+    def learn(self, context, reward, candidate_hours=None):
+        # Update estimates for all candidate hours
+        if candidate_hours is None:
+            candidate_hours = range(24)  # fallback to 24h if no candidates provided
+
+        for hour in candidate_hours:
+            key = (str(context), hour)
             if key not in self.estimates:
                 self.estimates[key] = 0.0
             self.estimates[key] += self.alpha * (reward - self.estimates[key])
@@ -98,16 +101,19 @@ def generate_recommendations(
         "context_tasks": context_tasks,
     }
 
-    if reward is not None:
-        # For feedback, use the full context
-        bandit.learn(context, reward)
-        return
-
-    # restrict candidate hours if mask is provided
+    # Determine candidate hours based on availability vector or full horizon
     if availability_vector:
         candidate_hours = [h for h, v in enumerate(availability_vector) if v]
     else:
-        candidate_hours = range(int(hours_until_due))
+        candidate_hours = range(int(hours_until_due) + 1)
+
+    if reward is not None:
+        # For feedback, use the same candidate hours as the prediction phase
+        print(
+            f"Learning with {len(candidate_hours)} candidate hours: {candidate_hours[:10]}..."
+        )
+        bandit.learn(context, reward, candidate_hours=candidate_hours)
+        return
 
     # Get predictions for all candidate hours
     predictions = []

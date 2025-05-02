@@ -35,7 +35,7 @@ def initializeDB():
         return _DB  # already created –> reuse
 
     try:
-        # Raises ValueError if the default app hasn’t been created yet
+        # Raises ValueError if the default app hasn't been created yet
         get_app()
     except ValueError:
         # No default app –> initialise it
@@ -148,6 +148,7 @@ def addTask(db, user_id, taskName, taskDuration, taskCategory, taskDeadline):
         "taskDuration": taskDuration,
         "taskCategory": taskCategory,
         "taskDeadline": taskDeadline,
+        "remainingHours": float(taskDuration),  # Initialize remaining hours
     }
     doc_ref.update({f"tasks.{task_id}": task_data})
 
@@ -163,35 +164,6 @@ def updateTask(
     doc = doc_ref.get()
     if not doc.exists:
         return False
-
-    task_data = {
-        "taskName": taskName,
-        "taskDuration": taskDuration,
-        "taskCategory": taskCategory,
-        "taskDeadline": taskDeadline,
-    }
-    # doc_ref.set({taskName: task_data})
-    # Update the user document with the new task using the generated task_id
-    doc_ref.update({f"tasks.{task_id}": task_data})
-    return task_id
-
-
-def updateTask(
-    db, user_id, task_id, taskName, taskDuration, taskCategory, taskDeadline
-):
-    """Modify an existing task."""
-
-    doc_ref = db.collection("UserTasks").document(user_id)
-    doc = doc_ref.get()
-    if not doc.exists:
-        return False
-
-    task_data = {
-        "taskName": taskName,
-        "taskDuration": taskDuration,
-        "taskCategory": taskCategory,
-        "taskDeadline": taskDeadline,
-    }
 
     user_data = doc.to_dict()  # Convert document snapshot to dictionary
     existing_tasks = user_data.get(
@@ -201,8 +173,31 @@ def updateTask(
     if task_id not in existing_tasks:
         print("Task ID doesn't exists.")
         return False
-    else:
-        doc_ref.update({f"tasks.{task_id}": task_data})
+
+    # Get current remaining hours
+    current_task = existing_tasks[task_id]
+    current_remaining = current_task.get(
+        "remainingHours", float(current_task.get("taskDuration", 0))
+    )
+
+    # Calculate new remaining hours based on duration change
+    old_duration = float(current_task.get("taskDuration", 0))
+    new_duration = float(taskDuration)
+    remaining_hours = (
+        current_remaining * (new_duration / old_duration)
+        if old_duration > 0
+        else new_duration
+    )
+
+    task_data = {
+        "taskName": taskName,
+        "taskDuration": taskDuration,
+        "taskCategory": taskCategory,
+        "taskDeadline": taskDeadline,
+        "remainingHours": remaining_hours,
+    }
+
+    doc_ref.update({f"tasks.{task_id}": task_data})
     return True
 
 
@@ -329,3 +324,57 @@ def TestRunUserPref():
 # # addTask(db,user_id,"taskTwo",5,"Studying",deadline)
 # # updateTask(db,user_id,taskID,"taskTwoEdited",5,"Editing",deadline)
 # deleteTask(db,user_id,taskID)
+
+
+def updateTaskRemainingHours(db, user_id, task_id, remaining_hours):
+    """Update the remaining hours for a task."""
+    doc_ref = db.collection("UserTasks").document(user_id)
+    doc_ref.update({f"tasks.{task_id}.remainingHours": remaining_hours})
+    return True
+
+
+def saveScheduledSlot(db, user_id, task_id, start_dt, end_dt):
+    """Save a scheduled slot to Firestore."""
+    month_key = start_dt.strftime("%Y-%m")
+    slots_ref = db.collection("ScheduledSlots").document(user_id).collection(month_key)
+
+    slots_ref.add(
+        {
+            "taskId": task_id,
+            "start": start_dt.isoformat(),
+            "end": end_dt.isoformat(),
+            "createdAt": datetime.now().isoformat(),
+        }
+    )
+    return True
+
+
+def loadScheduledSlots(db, user_id, start_dt=None):
+    """Load scheduled slots from Firestore, optionally filtered by start date."""
+    now = datetime.now()
+    if start_dt is None:
+        start_dt = now
+
+    slots_ref = db.collection("ScheduledSlots").document(user_id)
+    future_slots = []
+
+    # Get tasks map for title lookup
+    tasks_map = (
+        db.collection("UserTasks").document(user_id).get().to_dict().get("tasks", {})
+    )
+
+    for s in slots_ref.collections():  # each sub-collection is a month
+        for slot_doc in s.stream():
+            slot = slot_doc.to_dict()
+            st = datetime.fromisoformat(slot["start"].replace("Z", "+00:00"))
+            if st > start_dt:  # ignore past slots
+                future_slots.append(
+                    {
+                        "start": st,
+                        "end": datetime.fromisoformat(
+                            slot["end"].replace("Z", "+00:00")
+                        ),
+                        "title": f"⏰ {tasks_map[slot['taskId']]['taskName']}",
+                    }
+                )
+    return future_slots
