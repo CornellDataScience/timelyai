@@ -302,10 +302,10 @@ class GoogleCalendar:
             print("No upcoming events found.")
             return []
 
-        print("Upcoming events:")
-        for event in events:
-            start = event["start"].get("dateTime", event["start"].get("date"))
-            print(f'{start} - {event["summary"]}')
+        # print("Upcoming events:")
+        # for event in events:
+        #     start = event["start"].get("dateTime", event["start"].get("date"))
+        #     print(f'{start} - {event["summary"]}')
 
         return events
 

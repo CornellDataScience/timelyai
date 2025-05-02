@@ -45,64 +45,89 @@ EVENT_BUFFER = 1.5
 BLOCKED_TIMES = {}
 SCHEDULED_EVENTS = {}
 
+
+# Initialize bandit model
+class Bandit:
+    def __init__(self):
+        self.alpha = 1.0  # exploration parameter
+        self.estimates = {}  # action-value estimates
+
+    def predict(self, context, action):
+        key = (str(context), action)
+        if key not in self.estimates:
+            self.estimates[key] = 0.0
+        return self.estimates[key]
+
+    def learn(self, context, reward):
+        # Simple update rule - can be made more sophisticated
+        for action in range(24):  # 24 hours
+            key = (str(context), action)
+            if key not in self.estimates:
+                self.estimates[key] = 0.0
+            self.estimates[key] += self.alpha * (reward - self.estimates[key])
+
+
+bandit = Bandit()
+
 # ************************* BACKEND-FACING FUNCTIONS **************************
 
 
 def generate_recommendations(
+    *,
     task_type,
     task_duration,
     hours_until_due,
-    daily_free_time=4.0,
-    prefer_splitting=False,
-    context_tasks=None,
-    day_of_week=None,
+    daily_free_time,
+    day_of_week,
+    prefer_splitting,
+    context_tasks,
+    availability_vector=None,
+    top_k=1,
+    reward=None,
 ):
-    # Clear any existing blocked times
-    blocked_times = []
+    """
+    If reward is not None, update policy and return immediately.
+    Otherwise, return up to top_k recommendations.
+    """
+    # Build context for the bandit
+    context = {
+        "task_type": task_type,
+        "task_duration": task_duration,
+        "hours_until_due": hours_until_due,
+        "day_of_week": day_of_week,
+        "context_tasks": context_tasks,
+    }
 
-    # Add context tasks to blocked times
-    if context_tasks:
-        for task in context_tasks:
-            if task.get("category") == "blocked":
-                start_time = task.get("start_time", 0)
-                duration = task.get("duration", 0)
-                blocked_times.append((start_time, start_time + duration))
+    if reward is not None:
+        # For feedback, use the full context
+        bandit.learn(context, reward)
+        return
 
-    # Block time slots based on due dates
-    if hours_until_due > 0:
-        # Block the last 2 hours before due date
-        blocked_times.append((hours_until_due - 2, hours_until_due))
-
-    # Sort blocked times for easier processing
-    blocked_times.sort()
-
-    # Generate time slots
-    if prefer_splitting and task_duration > 2.0:
-        # Split into multiple sessions
-        num_sessions = math.ceil(task_duration / 2.0)
-        session_duration = task_duration / num_sessions
-        recommendations = []
-
-        for i in range(num_sessions):
-            # Try to find a non-blocked time slot
-            start_time = find_available_time_slot(
-                session_duration, blocked_times, hours_until_due, day_of_week
-            )
-            if start_time is not None:
-                recommendations.append((0, start_time, session_duration))
-                # Add this slot to blocked times
-                blocked_times.append((start_time, start_time + session_duration))
-                blocked_times.sort()
-
-        return recommendations if recommendations else None
+    # restrict candidate hours if mask is provided
+    if availability_vector:
+        candidate_hours = [h for h, v in enumerate(availability_vector) if v]
     else:
-        # Single session
-        start_time = find_available_time_slot(
-            task_duration, blocked_times, hours_until_due, day_of_week
-        )
-        if start_time is not None:
-            return (0, start_time, task_duration)
-        return None
+        candidate_hours = range(int(hours_until_due))
+
+    # Get predictions for all candidate hours
+    predictions = []
+    for hour in candidate_hours:
+        pred = bandit.predict(context, hour)
+        predictions.append((hour, pred))
+
+    # Sort by predicted value and take top_k
+    predictions.sort(key=lambda x: x[1], reverse=True)
+    best_slots = predictions[:top_k]
+
+    # Convert to the expected format (day, hour, duration)
+    recommendations = []
+    for hour, _ in best_slots:
+        day = hour // 24
+        hour_of_day = hour % 24
+        # For now, don't split tasks - just use full duration
+        recommendations.append((day, hour_of_day, task_duration))
+
+    return recommendations
 
 
 def find_available_time_slot(

@@ -4,8 +4,8 @@ from firestoreAPI import firestore_module as FB
 from datetime import datetime
 import json
 from flask import request, jsonify
-from googleCalendarAPI.googleCalendarAPI import GoogleCalendar  # ← your helper class
-from datetime import datetime, timedelta
+from googleCalendarAPI.googleCalendarAPI import GoogleCalendar
+from datetime import datetime, timedelta, time as dtime
 import pytz
 import os
 import sys
@@ -16,13 +16,13 @@ script_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(os.path.dirname(script_dir))
 timelyai_dir = os.path.join(project_root, "timelyai")
 sys.path.append(timelyai_dir)
+sys.path.append(os.path.join(timelyai_dir, "ml"))
+sys.path.append(os.path.join(timelyai_dir, "ml", "model"))
 
 from ml.model.contextual_bandits import generate_recommendations
 
-TOKEN_DIR = os.path.join(project_root, "timelyai/token.json")  # one JSON per user
-CREDS_JSON = os.path.join(
-    project_root, "timelyai/user_credentials.json"
-)  # OAuth client-secret
+TOKEN_DIR = os.path.join(project_root, "timelyai/token.json")
+CREDS_JSON = os.path.join(project_root, "timelyai/user_credentials.json")
 tz = pytz.timezone("America/New_York")
 
 app = Flask(__name__)
@@ -132,226 +132,415 @@ def load_goals():
         return jsonify({"status": "error", "message": str(e)}), 500
 
 
+def iso_to_dt(iso_str, tz):
+    try:
+        # Parse the ISO string to datetime
+        dt = datetime.fromisoformat(iso_str.replace("Z", "+00:00"))
+        # If the datetime is naive (no timezone), localize it
+        if dt.tzinfo is None:
+            dt = tz.localize(dt)
+        return dt
+    except Exception as e:
+        print(f"Error parsing datetime {iso_str}: {str(e)}")
+        return None
+
+
+def get_busy_slots_from_calendar(gcal):
+    try:
+        now = datetime.now(tz)
+        events = gcal.list_upcoming_events(max_results=250, time_min=now.isoformat())
+        busy_slots = []
+        for e in events:
+            try:
+                start_str = e["start"].get("dateTime", e["start"].get("date"))
+                end_str = e["end"].get("dateTime", e["end"].get("date"))
+                if start_str and end_str:
+                    start = iso_to_dt(start_str, tz)
+                    end = iso_to_dt(end_str, tz)
+                    if start and end:  # Only add if both times were parsed successfully
+                        busy_slots.append((start, end))
+            except Exception as e:
+                print(f"Error processing event: {str(e)}")
+                continue
+        return busy_slots
+    except Exception as e:
+        print(f"Error fetching calendar events: {str(e)}")
+        return []  # Return empty list if we can't fetch events
+
+
+def load_previous_recs(uid, db):
+    doc = db.collection("UserTasks").document(uid).get()
+    if not doc.exists:
+        return []
+    rec_doc = doc.to_dict().get("lastRecommendations", [])
+    return [(r["start"], r["duration"]) for r in rec_doc]
+
+
+def save_recommendations(uid, recommendations, db):
+    doc_ref = db.collection("UserTasks").document(uid)
+    doc_ref.update(
+        {
+            "lastRecommendations": [
+                {"start": start_dt.isoformat(), "duration": dur}
+                for _, start_dt, dur in recommendations
+            ]
+        }
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  Generate up-to-five urgent task recommendations and create Calendar events
+#  • never schedule 01:00-05:00  (sleep window)
+#  • never overlap existing events or past recommendations
+#  • works with hourly offsets returned by generate_recommendations()
+# ─────────────────────────────────────────────────────────────────────────────
+from datetime import datetime, timedelta
+import os, pytz, traceback
+from flask import request, jsonify
+
+TZ = pytz.timezone("America/New_York")
+SLEEP_START = 1  # 01:00
+SLEEP_END = 5  # 05:00
+
+
+def slot_conflict(start, end, slots):
+    for s in slots:
+        if start < s["end"] and end > s["start"]:
+            return s
+    return None
+
+
+def build_free_mask(now, busy, horizon_days=7):
+    """
+    Return list[int] length 24*horizon_days; 1 = free, 0 = busy/sleep.
+    """
+    mask = []
+    for day in range(horizon_days):
+        for hour in range(24):
+            slot_start = now.replace(minute=0, second=0, microsecond=0) + timedelta(
+                days=day, hours=hour
+            )
+            slot_end = slot_start + timedelta(hours=1)
+
+            # hard ban 01-05
+            if 1 <= slot_start.hour < 5:
+                mask.append(0)
+                continue
+
+            if slot_conflict(slot_start, slot_end, busy):
+                mask.append(0)
+            else:
+                mask.append(1)
+    return mask
+
+
+def violates_sleep(start, end):
+    # forbid any part that is strictly between 01:00 and 05:00
+    midnight = start.replace(hour=0, minute=0, second=0, microsecond=0)
+    ban_start = midnight + timedelta(hours=1)
+    ban_end = midnight + timedelta(hours=5)
+    return not (end <= ban_start or start >= ban_end)
+
+
 @app.route("/api/generate-recs", methods=["POST"])
 def generate_recommendations_endpoint():
+    print("🚀 Incoming POST to /api/generate-recommendations")
     data = request.get_json(silent=True) or {}
     user_id = data.get("userId")
-
     if not user_id:
         return jsonify({"status": "error", "message": "Missing userId"}), 400
 
+    # ─── Pull tasks from Firestore ───────────────────────────────────────────
     db = FB.initializeDB()
-    doc_ref = db.collection("UserTasks").document(user_id)
-    doc = doc_ref.get()
+    user_doc = db.collection("UserTasks").document(user_id).get()
+    if not user_doc.exists:
+        return jsonify({"status": "error", "message": "No tasks for user"}), 400
+    tasks_map = user_doc.to_dict().get("tasks", {})
+    print(f"Found {len(tasks_map)} tasks")
+    print(f"Got tasks")
 
-    if not doc.exists:
-        return jsonify({"status": "error", "message": "No tasks found for user"}), 400
-
-    tasks_map = doc.to_dict().get("tasks", {})
-
-    all_recommendations = []
-    all_event_links = []
-    used_time_slots = []
-
-    def parse_date(date_str):
+    # ─── Helper: robust deadline parser ──────────────────────────────────────
+    def _due_dt(task):
+        raw = task.get("taskDeadline")
         try:
-            return datetime.strptime(date_str, "%Y-%m-%d")
-        except ValueError:
+            d = datetime.strptime(raw, "%Y-%m-%d")
+        except Exception:
             try:
-                return datetime.strptime(date_str, "%m/%d/%y")
-            except ValueError:
-                return datetime(9999, 12, 31)
+                d = datetime.strptime(raw, "%m/%d/%y")
+            except Exception:
+                # fallback: seven days from now
+                d = datetime.now(TZ) + timedelta(days=7)
+        return TZ.localize(d).replace(hour=23, minute=59)
 
-    def convert_model_time_to_datetime(model_time, day_offset=0):
-        now = datetime.now(tz)
-        target_time = now + timedelta(hours=model_time)
-        if day_offset > 0:
-            target_time = target_time + timedelta(days=day_offset)
-        return target_time
+    # pick top-5 urgent (nearest due-date, then longer duration first)
+    tasks_sorted = sorted(
+        tasks_map.values(), key=lambda t: (_due_dt(t), -float(t.get("taskDuration", 1)))
+    )[:5]
+    print(f"Processing {len(tasks_sorted)} most-urgent tasks")
 
-    def adjust_time_to_business_hours(hours_from_now, due_datetime=None):
-        now = datetime.now(tz)
-        target_time = now + timedelta(hours=hours_from_now)
-
-        if due_datetime:
-            if due_datetime.tzinfo is None:
-                due_datetime = tz.localize(due_datetime)
-            due_datetime = due_datetime - timedelta(hours=2)
-
-            if target_time > due_datetime:
-                target_time = due_datetime
-
-        hour = target_time.hour
-
-        if hour < 6:
-            target_time = target_time.replace(hour=6, minute=0, second=0, microsecond=0)
-        elif hour >= 23:
-            target_time = (target_time + timedelta(days=1)).replace(
-                hour=6, minute=0, second=0, microsecond=0
-            )
-
-        new_hours_from_now = (target_time - now).total_seconds() / 3600
-        return new_hours_from_now
-
-    def check_time_slot_availability(start_time, duration, existing_slots):
-        slot_start = convert_model_time_to_datetime(start_time)
-        slot_end = slot_start + timedelta(hours=duration)
-
-        for existing_start, existing_duration in existing_slots:
-            existing_start_dt = convert_model_time_to_datetime(existing_start)
-            existing_end_dt = existing_start_dt + timedelta(hours=existing_duration)
-
-            buffer_time = timedelta(minutes=30)
-
-            if (
-                slot_start < existing_end_dt + buffer_time
-                and slot_end + buffer_time > existing_start_dt
-            ):
-                return False
-
-        return True
-
-    def get_random_time_slot(hours_until_due, duration, used_slots):
-        now = datetime.now(tz)
-        max_hours = min(hours_until_due - duration, 24 * 7)
-
-        for _ in range(10):
-            random_hours = random.uniform(1, max_hours)
-            adjusted_time = adjust_time_to_business_hours(random_hours)
-
-            if check_time_slot_availability(adjusted_time, duration, used_slots):
-                return adjusted_time
-
-        return None
-
-    sorted_tasks = sorted(
-        tasks_map.items(),
-        key=lambda x: parse_date(x[1].get("taskDeadline", "9999-12-31")),
-    )
-
-    for task_id, task_data in sorted_tasks:
-        task_name = task_data.get("taskName", "Untitled")
-        task_type = task_data.get("taskCategory", "hw")
-        task_duration = float(task_data.get("taskDuration", 1.0))
-        due_date = task_data.get("taskDeadline", "")
-
-        try:
-            due_datetime = parse_date(due_date)
-            if due_datetime.tzinfo is None:
-                due_datetime = tz.localize(due_datetime)
-            hours_until_due = (due_datetime - datetime.now(tz)).total_seconds() / 3600
-        except (ValueError, TypeError):
-            hours_until_due = 24.0
-            due_datetime = None
-
-        if hours_until_due <= 0:
-            continue
-
-        try:
-            context_tasks = []
-
-            for tid, tdata in tasks_map.items():
-                if tid != task_id:
-                    context_tasks.append(
-                        {
-                            "name": tdata.get("taskName", "Untitled"),
-                            "duration": float(tdata.get("taskDuration", 1.0)),
-                            "due_date": tdata.get("taskDeadline", "TBD"),
-                            "category": tdata.get("taskCategory", "None"),
-                        }
-                    )
-
-            for _, start_time, duration in all_recommendations:
-                context_tasks.append(
-                    {
-                        "name": "Scheduled Task",
-                        "duration": duration,
-                        "due_date": "TBD",
-                        "category": "blocked",
-                        "start_time": start_time,
-                    }
-                )
-
-            task_recommendations = []
-            attempts = 0
-            max_attempts = 10
-            remaining_duration = task_duration
-
-            while remaining_duration > 0 and attempts < max_attempts:
-                session_duration = min(remaining_duration, 2.0)
-                random_time = get_random_time_slot(
-                    hours_until_due, session_duration, used_time_slots
-                )
-
-                if random_time is not None:
-                    task_recommendations.append(
-                        (f"⏰ {task_name}", random_time, session_duration)
-                    )
-                    used_time_slots.append((random_time, session_duration))
-                    remaining_duration -= session_duration
-                else:
-                    break
-
-                attempts += 1
-
-            if task_recommendations:
-                all_recommendations.extend(task_recommendations)
-
-        except Exception as e:
-            continue
-
-    if not all_recommendations:
-        return (
-            jsonify(
-                {
-                    "status": "error",
-                    "message": "No recommendations generated for any tasks",
-                }
-            ),
-            500,
-        )
-
-    token_path = os.path.join(os.path.dirname(TOKEN_DIR), f"token.json")
+    # ─── Google Calendar + existing busy slots ───────────────────────────────
+    token_path = os.path.join(os.path.dirname(TOKEN_DIR), "token.json")
     if not os.path.exists(token_path):
         return jsonify({"status": "error", "message": "User not authenticated"}), 401
+    gcal = GoogleCalendar(credentials_path=CREDS_JSON, token_path=token_path)
 
-    try:
-        gcal = GoogleCalendar(credentials_path=CREDS_JSON, token_path=token_path)
-    except Exception as e:
-        return (
-            jsonify({"status": "error", "message": "Failed to initialize calendar"}),
-            500,
+    def _iso_to_dt(iso):
+        if len(iso) == 10:  # all-day  YYYY-MM-DD
+            iso += "T00:00:00Z"
+        return datetime.fromisoformat(iso.replace("Z", "+00:00")).astimezone(TZ)
+
+    def get_busy_slots(gcal, horizon_days: int = 7):
+        """
+        Return list[{start,end,title}] covering ALL calendars.
+        """
+        tzlocal = TZ
+        now = datetime.now(tzlocal)
+        horizon = now + timedelta(days=horizon_days)
+
+        # 1) discover all calendars
+        cal_ids = [
+            c["id"] for c in gcal.service.calendarList().list().execute()["items"]
+        ]
+
+        # 2) freeBusy query
+        body = {
+            "timeMin": now.isoformat(),
+            "timeMax": horizon.isoformat(),
+            "items": [{"id": cid} for cid in cal_ids],
+        }
+        fb = gcal.service.freebusy().query(body=body).execute()
+
+        busy = []
+        for cid, data in fb["calendars"].items():
+            for interval in data.get("busy", []):
+                # Handle UTC 'Z' suffix by replacing with +00:00
+                s = datetime.fromisoformat(
+                    interval["start"].replace("Z", "+00:00")
+                ).astimezone(tzlocal)
+                e = datetime.fromisoformat(
+                    interval["end"].replace("Z", "+00:00")
+                ).astimezone(tzlocal)
+                busy.append({"start": s, "end": e, "title": f"Busy ({cid})"})
+        return busy
+
+    busy_slots = get_busy_slots(gcal)
+    print(f"{len(busy_slots)} busy slots from Calendar")
+
+    def get_busy_slots_from_calendar(gcal):
+        try:
+            now = datetime.now(tz)
+            events = gcal.list_upcoming_events(
+                max_results=250, time_min=now.isoformat()
+            )
+            busy_slots = []
+            for e in events:
+                try:
+                    start_str = e["start"].get("dateTime", e["start"].get("date"))
+                    end_str = e["end"].get("dateTime", e["end"].get("date"))
+                    if start_str and end_str:
+                        start = iso_to_dt(start_str, tz)
+                        end = iso_to_dt(end_str, tz)
+                        if (
+                            start and end
+                        ):  # Only add if both times were parsed successfully
+                            busy_slots.append((start, end))
+                except Exception as e:
+                    print(f"Error processing event: {str(e)}")
+                    continue
+            return busy_slots
+        except Exception as e:
+            print(f"Error fetching calendar events: {str(e)}")
+            return []  # Return empty list if we can't fetch events
+
+    def load_previous_recs(uid, db):
+        doc = db.collection("UserTasks").document(uid).get()
+        if not doc.exists:
+            return []
+        rec_doc = doc.to_dict().get("lastRecommendations", [])
+        return [(r["start"], r["duration"]) for r in rec_doc]
+
+    def save_recommendations(uid, recommendations, db):
+        doc_ref = db.collection("UserTasks").document(uid)
+        doc_ref.update(
+            {
+                "lastRecommendations": [
+                    {"start": start_dt.isoformat(), "duration": dur}
+                    for _, start_dt, dur in recommendations
+                ]
+            }
         )
 
-    all_recommendations.sort(key=lambda x: x[1])
+    # previous recommendations (so repeated calls stay unique)
+    def load_prev_recs():
+        recs = user_doc.to_dict().get("lastRecommendations", [])
+        slots = []
+        for r in recs:
+            try:
+                st = _iso_to_dt(r["start"])
+                slots.append(
+                    {
+                        "start": st,
+                        "end": st + timedelta(hours=float(r["duration"])),
+                        "title": r["title"],
+                    }
+                )
+            except Exception:
+                continue
+        return slots
 
-    successful_events = 0
-    for summary, start_in, dur in all_recommendations:
-        start = datetime.now(tz) + timedelta(hours=float(start_in))
-        end = start + timedelta(hours=float(dur or 1))
+    used_time_slots = load_prev_recs()
+    print(f"{len(used_time_slots)} past recommendations loaded")
 
+    # ─── Main loop over tasks ────────────────────────────────────────────────
+    all_recs = []  # [(title,start_dt,dur_hrs)]
+    now = datetime.now(TZ)
+
+    # Build availability vector once per run
+    availability_vector = build_free_mask(now, busy_slots + used_time_slots)
+
+    for task in tasks_sorted:
+        print(f"Processing task: {task}")
+        title = task.get("taskName", "Untitled")
+        cat = task.get("taskCategory", "general")
+        dur_hrs = float(task.get("taskDuration", 1))
+        due_dt = _due_dt(task)
+        hrs_left = (due_dt - now).total_seconds() / 3600
+        print(f"\nTask «{title}»  due in {hrs_left:.1f} h")
+
+        if hrs_left <= dur_hrs + 1:  # must finish before deadline
+            print("  ⤷ too little time remaining, skipping")
+            continue
+
+        # context for model
+        context = [
+            {
+                "name": t.get("taskName", "Untitled"),
+                "duration": float(t.get("taskDuration", 1)),
+                "due_date": t.get("taskDeadline", "TBD"),
+                "category": t.get("taskCategory", "None"),
+            }
+            for t in tasks_sorted
+            if t is not task
+        ]
+
+        max_tries = 10
+        placed = False
+
+        for attempt in range(1, max_tries + 1):
+            recs = generate_recommendations(
+                task_type=cat,
+                task_duration=dur_hrs,
+                hours_until_due=hrs_left,
+                daily_free_time=8.0,
+                day_of_week=now.weekday(),
+                prefer_splitting=True,
+                context_tasks=context,
+                availability_vector=availability_vector,  # NEW
+                top_k=6,  # NEW
+            )
+
+            if not recs:
+                # tell model this attempt failed -> encourage exploration
+                generate_recommendations(
+                    task_type=cat,
+                    task_duration=dur_hrs,
+                    hours_until_due=hrs_left,
+                    daily_free_time=8.0,
+                    day_of_week=now.weekday(),
+                    prefer_splitting=True,
+                    context_tasks=context,
+                    reward=-1,
+                )
+                continue
+
+            if isinstance(recs, tuple):
+                recs = [recs]
+
+            # iterate through the up-to-6 candidate slots
+            for _, offset_h, d in recs:
+                start_dt = now + timedelta(hours=float(offset_h))
+                end_dt = start_dt + timedelta(hours=float(d))
+
+                if violates_sleep(start_dt, end_dt):
+                    continue
+                if slot_conflict(start_dt, end_dt, busy_slots + used_time_slots):
+                    continue
+                if end_dt > due_dt:
+                    continue
+
+                # accept slot ---------------------------------------------------------
+                all_recs.append((f"⏰ {title}", start_dt, float(d)))
+                used_time_slots.append(
+                    {"start": start_dt, "end": end_dt, "title": f"⏰ {title}"}
+                )
+                print(
+                    f"  ✓ scheduled {start_dt:%a %m-%d %H:%M} for {d} h (try {attempt})"
+                )
+                placed = True
+                break  # stop iterating rec list
+
+            if placed:
+                break  # stop tries loop
+            else:
+                # negative reward for each rejected rec list
+                generate_recommendations(
+                    task_type=cat,
+                    task_duration=dur_hrs,
+                    hours_until_due=hrs_left,
+                    daily_free_time=8.0,
+                    day_of_week=now.weekday(),
+                    prefer_splitting=True,
+                    context_tasks=context,
+                    reward=-1,
+                )
+
+        if not placed:
+            print("  ⤷ no valid recommendation after exploration")
+
+    if not all_recs:
+        return jsonify({"status": "error", "message": "No valid slots"}), 409
+
+    # ─── Create Calendar events ──────────────────────────────────────────────
+    print(f"Creating {len(all_recs)} events")
+    links = []
+    for summary, start_dt, d in all_recs:
         try:
             ev = gcal.create_event(
                 summary=summary,
                 description=summary,
-                start_time=start,
-                end_time=end,
+                start_time=start_dt,
+                end_time=start_dt + timedelta(hours=d),
                 color_id="5",
             )
             if ev and "htmlLink" in ev:
-                all_event_links.append(ev["htmlLink"])
-                successful_events += 1
-        except Exception as e:
-            continue
+                links.append(ev["htmlLink"])
+        except Exception:
+            traceback.print_exc()
 
-    response = jsonify(
+    # persist for uniqueness next call
+    db.collection("UserTasks").document(user_id).set(
+        {
+            "lastRecommendations": [
+                {"title": r[0], "start": r[1].isoformat(), "duration": r[2]}
+                for r in all_recs
+            ]
+        },
+        merge=True,
+    )
+    print(f"Created {len(all_recs)} events")
+    return jsonify(
         {
             "status": "success",
-            "recommendations": [r[0] for r in all_recommendations],
-            "eventLinks": all_event_links,
+            "recommendations": [
+                {"title": r[0], "start": r[1].isoformat(), "duration": r[2]}
+                for r in all_recs
+            ],
+            "eventLinks": links,
         }
     )
-    return response
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 
 
 if __name__ == "__main__":
