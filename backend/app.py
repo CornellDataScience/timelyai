@@ -24,12 +24,12 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 import pytz
 import firestoreAPI.firestore_module as FB
-from model.vw_bandit import vw_recommend, vw_feedback, save_model
+import model.vw_bandit as VW  # << unified import
 from googleCalendarAPI.googleCalendarAPI import GoogleCalendar
 import atexit
 
 # Register model save on exit
-atexit.register(save_model)
+atexit.register(VW.save_model)
 
 app = Flask(__name__)
 CORS(app)
@@ -45,6 +45,18 @@ TIMELY_CREDS_JSON = os.path.join(project_root, "timely_calendar_credentials.json
 
 # Initialize Firestore
 db = FB.initializeDB()
+
+
+# ───────────────────────── helper to get *uid* ─────────────────────────────
+
+
+def current_uid(req) -> str:
+    return (
+        req.headers.get("X-User-UID")
+        or req.headers.get("X-User-Email")
+        or (req.get_json(silent=True) or {}).get("userId")
+    )
+
 
 # ───────────── Calendar‑watch bookkeeping ──────────────
 CHANNELS_COL = "CalendarChannels"  # Firestore collection
@@ -447,6 +459,68 @@ def start_calendar_watch(timely_gcal, webhook_url):
     return watch
 
 
+# def send_invite_via_timely(
+#     timely_gcal,
+#     title,
+#     start_dt,
+#     dur,
+#     user_email,
+#     task_id,
+#     task_type,
+#     hrs_until_due,
+#     chosen_hour,
+#     prob,
+# ):
+#     """
+#     Insert the event on TimelyAI's calendar and e‑mail the invite.
+#     Returns htmlLink (string) or None.
+#     """
+#     if start_dt.tzinfo is None:
+#         start_dt = TZ.localize(start_dt)
+#     end_dt = start_dt + timedelta(hours=dur)
+
+#     body = {
+#         "summary": title,
+#         "description": f"TimelyAI scheduled task «{title}»",
+#         "start": {"dateTime": start_dt.isoformat()},
+#         "end": {"dateTime": end_dt.isoformat()},
+#         "attendees": [{"email": user_email}],
+#         "extendedProperties": {
+#             "private": {
+#                 "taskId": task_id,
+#                 "scheduledAt": datetime.now(TZ).isoformat(),
+#             }
+#         },
+#     }
+
+#     try:
+#         ev = (
+#             timely_gcal.events()
+#             .insert(calendarId="primary", body=body, sendUpdates="none")
+#             .execute()
+#         )
+
+#         # --- store model context for when the user responds ---
+#         db.collection("InviteTracking").document(ev["id"]).set(
+#             {
+#                 "taskId": task_id,
+#                 "taskType": task_type,
+#                 "chunkDuration": dur,
+#                 "hrsUntilDue": hrs_until_due,
+#                 "dayOfWeek": datetime.now(TZ).weekday(),
+#                 "chosenHour": chosen_hour,
+#                 "prob": prob,
+#                 "handled": False,
+#                 "createdAt": datetime.now(TZ).isoformat(),
+#             }
+#         )
+
+#         return ev.get("htmlLink"), ev.get("id")
+#     except Exception:
+#         traceback.print_exc()
+#         return None, None
+
+
 def send_invite_via_timely(
     timely_gcal,
     title,
@@ -459,16 +533,12 @@ def send_invite_via_timely(
     chosen_hour,
     prob,
 ):
-    """
-    Insert the event on TimelyAI's calendar and e‑mail the invite.
-    Returns htmlLink (string) or None.
-    """
     if start_dt.tzinfo is None:
         start_dt = TZ.localize(start_dt)
     end_dt = start_dt + timedelta(hours=dur)
 
     body = {
-        "summary": title,
+        "summary": "⏰ " + title,
         "description": f"TimelyAI scheduled task «{title}»",
         "start": {"dateTime": start_dt.isoformat()},
         "end": {"dateTime": end_dt.isoformat()},
@@ -477,18 +547,16 @@ def send_invite_via_timely(
             "private": {
                 "taskId": task_id,
                 "scheduledAt": datetime.now(TZ).isoformat(),
+                "userId": user_email,  # ← store for webhook
             }
         },
     }
-
     try:
         ev = (
             timely_gcal.events()
             .insert(calendarId="primary", body=body, sendUpdates="none")
             .execute()
         )
-
-        # --- store model context for when the user responds ---
         db.collection("InviteTracking").document(ev["id"]).set(
             {
                 "taskId": task_id,
@@ -498,11 +566,11 @@ def send_invite_via_timely(
                 "dayOfWeek": datetime.now(TZ).weekday(),
                 "chosenHour": chosen_hour,
                 "prob": prob,
+                "userId": user_email,  # ← for feedback
                 "handled": False,
                 "createdAt": datetime.now(TZ).isoformat(),
             }
         )
-
         return ev.get("htmlLink"), ev.get("id")
     except Exception:
         traceback.print_exc()
@@ -544,7 +612,54 @@ def process_feedback_webhook():
 
     _update_sync_token(channel_id, changes["nextSyncToken"])
 
+    # for ev in changes.get("items", []):
+    #     attendees = ev.get("attendees", [])
+    #     user_att = next(
+    #         (
+    #             a
+    #             for a in attendees
+    #             if a.get("self") or a["email"].endswith("@cornell.edu")
+    #         ),
+    #         None,
+    #     )
+    #     if not user_att:
+    #         continue
+
+    #     resp = user_att["responseStatus"]  # accepted | declined | …
+    #     if resp not in ("accepted", "declined"):
+    #         continue
+
+    #     # --- reward / log exactly like before --------------------------
+    #     track_doc = db.collection("InviteTracking").document(ev["id"]).get()
+    #     if not track_doc.exists:
+    #         continue
+    #     ctx = track_doc.to_dict()
+    #     if ctx.get("handled"):
+    #         continue
+
+    #     cost = 0.0 if resp == "accepted" else 1.0
+    #     vw_feedback(
+    #         task_type=ctx["taskType"],
+    #         task_duration=ctx["chunkDuration"],
+    #         hrs_until_due=ctx["hrsUntilDue"],
+    #         day_of_week=ctx["dayOfWeek"],
+    #         chosen_hour=ctx["chosenHour"],
+    #         cost=cost,
+    #         prob=ctx["prob"],
+    #     )
+
+    #     db.collection("InviteTracking").document(ev["id"]).update(
+    #         {
+    #             "handled": True,
+    #             "responseStatus": resp,
+    #             "feedbackAt": datetime.now(TZ).isoformat(),
+    #         }
+    #     )
+    #     print(f"✅ feedback for {ev['id']} → {resp}")
+
+    # return ("", 204)
     for ev in changes.get("items", []):
+        # locate user attendee (same logic as before)
         attendees = ev.get("attendees", [])
         user_att = next(
             (
@@ -556,12 +671,10 @@ def process_feedback_webhook():
         )
         if not user_att:
             continue
-
-        resp = user_att["responseStatus"]  # accepted | declined | …
+        resp = user_att["responseStatus"]
         if resp not in ("accepted", "declined"):
             continue
 
-        # --- reward / log exactly like before --------------------------
         track_doc = db.collection("InviteTracking").document(ev["id"]).get()
         if not track_doc.exists:
             continue
@@ -569,17 +682,16 @@ def process_feedback_webhook():
         if ctx.get("handled"):
             continue
 
-        cost = 0.0 if resp == "accepted" else 1.0
-        vw_feedback(
+        VW.vw_feedback(
+            uid=ctx["userId"],
             task_type=ctx["taskType"],
             task_duration=ctx["chunkDuration"],
             hrs_until_due=ctx["hrsUntilDue"],
             day_of_week=ctx["dayOfWeek"],
             chosen_hour=ctx["chosenHour"],
-            cost=cost,
+            cost=(resp == "accepted"),
             prob=ctx["prob"],
         )
-
         db.collection("InviteTracking").document(ev["id"]).update(
             {
                 "handled": True,
@@ -588,7 +700,6 @@ def process_feedback_webhook():
             }
         )
         print(f"✅ feedback for {ev['id']} → {resp}")
-
     return ("", 204)
 
 
@@ -600,24 +711,11 @@ def generate_recommendations_endpoint():
         data = request.get_json() or {}
         print(f"📦 Received request data: {json.dumps(data, indent=2)}")
 
-        # ------------------------------------------------------------------ #
-        # 1. Basic input
-        # ------------------------------------------------------------------ #
         user_id = data.get("userId")
         if not user_id:
             return jsonify({"error": "Missing userId"}), 400
 
-        # ------------------------------------------------------------------ #
-        # 2. Resolve token path automatically
-        # ------------------------------------------------------------------ #
-        #  • first priority: constant USER_TOKEN_DIR (per‑user token file)
-        #  • fall‑back: ~/.config/timelyai/<user>@token.json
-        # ------------------------------------------------------------------ #
         token_path = USER_TOKEN_DIR
-        # if not os.path.exists(token_path):
-        #     token_path = os.path.expanduser(
-        #         f"~/.config/timelyai/{user_id.replace('@', '_')}_token.json"
-        #     )
 
         if not os.path.exists(token_path):
             print(f"❌ OAuth token not found for {user_id}: {token_path}")
@@ -634,18 +732,12 @@ def generate_recommendations_endpoint():
         print(f"👤 userId ..... {user_id}")
         print(f"🔑 tokenPath .. {token_path}")
 
-        # ------------------------------------------------------------------ #
-        # 3. Calendar clients
-        # ------------------------------------------------------------------ #
         user_gcal = GoogleCalendar(
             credentials_path=USER_CREDS_JSON, token_path=token_path
         )
         timely_gcal = get_timely_calendar_service()
         print("✅ Calendar services initialised")
 
-        # ------------------------------------------------------------------ #
-        # 4. Load tasks, busy slots, build availability mask
-        # ------------------------------------------------------------------ #
         tasks = load_tasks_with_remaining_hours(user_id, db)
         calendar_busy = get_busy_slots(user_gcal)
         future_slots = load_future_scheduled_slots(user_id, db)
@@ -708,14 +800,13 @@ def generate_recommendations_endpoint():
             print(f"  • Available hours: {len(task_hours)}")
             print(f"  • First few candidate hours: {task_hours[:5]}")
 
-            vw_slots = vw_recommend(
+            vw_slots = VW.vw_recommend(
+                uid=user_id,
                 task_type=cat,
                 task_duration=remaining,
                 hrs_until_due=max_off,
                 day_of_week=now.weekday(),
                 candidate_hours=task_hours,
-                top_k=6,  # candidates – we'll screen them
-                prefer_splitting=True,
             )
 
             print(f"  📈 Model recommendations:")
