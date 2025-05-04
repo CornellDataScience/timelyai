@@ -10,16 +10,11 @@ document.addEventListener("DOMContentLoaded", function () {
     const modal = document.getElementById("taskModal");
     const closeButton = document.querySelector(".close");
     const submitTaskButton = document.getElementById("submitTask");
-    let userId;
 
-    chrome.storage.local.get(['userEmail'], function(result) {
-        userId = result.userEmail;
-        localStorage.setItem("userId", userId);
-        console.log("Retrieved email:", userId); // <-- fixed variable name
-        loadTasks(userId); // <-- pass it into your async function
-      });
+    const userId = "TestALL"; // You can later make this dynamic
 
-    async function loadTasks(userId) {
+    // load task from firestore
+    async function loadTasks() {
         taskList.innerHTML = "<li>Loading tasks...</li>"; // ⏳ loading indicator
         try {
             const response = await fetch(`http://localhost:8888/api/tasks?userId=${userId}`);
@@ -27,6 +22,7 @@ document.addEventListener("DOMContentLoaded", function () {
             let weeklyBreakup = {"School": 0, "Clubs": 0, "Friends": 0, "Hobbies": 0, "Other": 0};
     
             taskList.innerHTML = ""; // Clear the list
+            
             if (tasks.length === 0) {
                 taskList.innerHTML = "<li>No tasks found.</li>";
                 return;
@@ -109,6 +105,7 @@ document.addEventListener("DOMContentLoaded", function () {
                     }
                 });
 
+            
                 taskList.appendChild(li);
             });            
             console.log(weeklyBreakup);
@@ -136,7 +133,7 @@ document.addEventListener("DOMContentLoaded", function () {
             // ✅ Now draw pie with external function
             // Fetch saved goals and redraw with both data sets
             try {
-                const res = await fetch(`http://localhost:8888/api/goals?userId=${userId}`);
+                const res = await fetch("http://localhost:8888/api/goals?userId=TestALL");
                 const data = await res.json();
                 const goals = data.goals || {};
                 drawPieChart(slices, svg, goals);
@@ -154,8 +151,7 @@ document.addEventListener("DOMContentLoaded", function () {
             taskList.innerHTML = "<li>Error loading tasks.</li>";
         }
     }
-    
-        // Close button
+    // Close button
     document.getElementById("closeTaskDetailModal").addEventListener("click", () => {
         document.getElementById("taskDetailModal").style.display = "none";
     });
@@ -172,6 +168,10 @@ document.addEventListener("DOMContentLoaded", function () {
             modal.style.display = "none";
         }
     });
+
+
+    // 🚀 Initial task load
+    loadTasks();
 
     // 🎯 Modal logic
     addTaskButton.addEventListener("click", () => {
@@ -243,6 +243,21 @@ document.addEventListener("DOMContentLoaded", function () {
     });
     
 
+    // 📅 Simple event creation alert
+    document.getElementById("createEvent").addEventListener("click", function () {
+        const title = document.getElementById("eventTitle").value;
+        const date = document.getElementById("eventDate").value;
+        const time = document.getElementById("eventTime").value;
+        const location = document.getElementById("eventLocation").value;
+
+        if (title && date && time && location) {
+            alert(`Event Created: ${title} on ${date} at ${time} in ${location}`);
+        } else {
+            alert("Please fill out all fields!");
+        }
+    });
+});
+
 // 🎨 Emoji utility
 function getCategoryEmoji(category) {
     switch (category) {
@@ -308,7 +323,7 @@ function renderEvents(events) {
             const res = await fetch("http://localhost:8888/api/generate-recs", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ userId: userId }) // check this again
+                body: JSON.stringify({ userId: "TestALL" })
             });
 
             const data = await res.json();
@@ -325,5 +340,4 @@ function renderEvents(events) {
             generateBtn.textContent = "Get Recommendations";
         }
     });
-});
 });
