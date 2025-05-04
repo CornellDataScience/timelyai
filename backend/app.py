@@ -46,6 +46,28 @@ TIMELY_CREDS_JSON = os.path.join(project_root, "timely_calendar_credentials.json
 # Initialize Firestore
 db = FB.initializeDB()
 
+# ───────────── Calendar‑watch bookkeeping ──────────────
+CHANNELS_COL = "CalendarChannels"  # Firestore collection
+SYNC_TOKEN_FIELD = "nextSyncToken"
+EXPIRY_FIELD = "expires"
+
+
+def _store_channel(channel_doc):
+    """Persist channel metadata + first syncToken."""
+    db.collection(CHANNELS_COL).document(channel_doc["id"]).set(channel_doc)
+
+
+def _get_channel(channel_id):
+    doc = db.collection(CHANNELS_COL).document(channel_id).get()
+    return doc.to_dict() if doc.exists else None
+
+
+def _update_sync_token(channel_id, new_token):
+    db.collection(CHANNELS_COL).document(channel_id).update(
+        {SYNC_TOKEN_FIELD: new_token}
+    )
+
+
 # Timezone setup
 TZ = pytz.timezone("America/New_York")
 
@@ -396,19 +418,33 @@ def save_scheduled_slot(uid, task_id, start_dt, end_dt, db):
 
 
 def start_calendar_watch(timely_gcal, webhook_url):
-    """Set up Calendar push notifications to receive event updates."""
-    # Generate a unique channel ID using timestamp
-    channel_id = f"timely-ai-chan-{int(datetime.now().timestamp())}"
+    """Create a push‑channel *and* remember its initial nextSyncToken."""
+    now = datetime.now(TZ)
+    channel_id = f"timely-ai-chan-{int(now.timestamp())}"
 
     body = {
-        "id": channel_id,  # unique channel ID
+        "id": channel_id,
         "type": "web_hook",
-        "address": webhook_url,  # e.g. https://mydomain.com/api/calendar-webhook
-        "params": {"ttl": "86400"},  # how long before you need to renew (in seconds)
+        "address": webhook_url,
+        "params": {"ttl": "86400"},  # 24 h – renew sooner in prod
     }
+    watch = timely_gcal.events().watch(calendarId="primary", body=body).execute()
 
-    print(f"🔄 Setting up calendar watch with channel ID: {channel_id}")
-    return timely_gcal.events().watch(calendarId="primary", body=body).execute()
+    # Do an initial full sync to get the first token
+    full = timely_gcal.events().list(calendarId="primary", showDeleted=False).execute()
+    token = full["nextSyncToken"]
+
+    _store_channel(
+        {
+            "id": channel_id,
+            "resourceId": watch["resourceId"],
+            "calendarId": "primary",
+            SYNC_TOKEN_FIELD: token,
+            EXPIRY_FIELD: int(watch["expiration"]),  # ms since epoch
+            "createdAt": now.isoformat(),
+        }
+    )
+    return watch
 
 
 def send_invite_via_timely(
@@ -475,95 +511,85 @@ def send_invite_via_timely(
 
 @app.route("/api/calendar-webhook", methods=["POST"])
 def process_feedback_webhook():
-    """
-    Receives push notifications from Google Calendar.
-    When an invite is accepted or declined, we fetch the event,
-    look up our stored context, and send a positive or negative reward.
-    """
-    print("\n📨 Received calendar webhook notification")
-
-    # Google will send a bare notification; the headers carry the resource ID:
     channel_id = request.headers.get("X-Goog-Channel-ID")
-    resource_id = request.headers.get("X-Goog-Resource-ID")  # calendarId
-    resource_uri = request.headers.get("X-Goog-Resource-URI")  # includes ?eventId=...
+    res_state = request.headers.get("X-Goog-Resource-State")  # "exists", "sync" …
+    print(f"\n📨 push {channel_id=} {res_state=}")
 
-    print(f"  • Channel ID: {channel_id}")
-    print(f"  • Resource ID: {resource_id}")
-    print(f"  • Resource URI: {resource_uri}")
-
-    # Extract the eventId from resource_uri query-string
-    from urllib.parse import urlparse, parse_qs
-
-    event_id = parse_qs(urlparse(resource_uri).query).get("eventId", [None])[0]
-    if not event_id:
-        print("  ❌ No event ID found in resource URI")
-        return ("", 400)
-
-    print(f"  • Event ID: {event_id}")
-
-    # fetch the up-to-date event from the TimelyAI calendar
-    timely_gcal = get_timely_calendar_service()
-    ev = timely_gcal.events().get(calendarId="primary", eventId=event_id).execute()
-
-    # find the attendee entry for our user
-    attendees = ev.get("attendees", [])
-    user_att = next(
-        (a for a in attendees if a.get("self") or a["email"].endswith("@cornell.edu")),
-        None,
-    )
-    if not user_att:
-        print("  ⚠️  No matching attendee found")
-        return ("", 204)
-
-    resp = user_att.get(
-        "responseStatus"
-    )  # "accepted", "declined", "tentative", or "needsAction"
-    print(f"  • Response status: {resp}")
-
-    # only reward when they explicitly accept or decline
-    if resp not in ("accepted", "declined"):
-        print("  ⚠️  Not an explicit accept/decline")
-        return ("", 204)
-
-    # load our saved context
-    doc = db.collection("InviteTracking").document(event_id).get()
-    if not doc.exists:
-        print("  ❌ No tracking context found")
+    chan = _get_channel(channel_id)
+    if not chan:
+        print("❌ unknown channel")
         return ("", 404)
-    ctx = doc.to_dict()
 
-    # Check if we've already handled this response
-    if ctx.get("handled", False):
-        print("  ⚠️  Already handled this response")
-        return ("", 200)
+    svc = get_timely_calendar_service()
 
-    # Comment out feedback processing for now
-    """
-    cost = 0.0 if resp == "accepted" else 1.0
-    print(f"  • Providing feedback with cost: {cost}")
+    try:
+        changes = (
+            svc.events()
+            .list(
+                calendarId=chan["calendarId"],
+                syncToken=chan[SYNC_TOKEN_FIELD],
+                maxResults=2500,
+                singleEvents=True,
+            )
+            .execute()
+        )
+    except HttpError as e:
+        # happens when the token is stale → restart full sync
+        if e.resp.status == 410:
+            print("⚠️  token expired – doing full resync")
+            full = svc.events().list(calendarId=chan["calendarId"]).execute()
+            changes = full
+        else:
+            raise
 
-    vw_feedback(
-        task_type=ctx["taskType"],
-        task_duration=ctx["chunkDuration"],
-        hrs_until_due=ctx["hrsUntilDue"],
-        day_of_week=ctx["dayOfWeek"],
-        chosen_hour=ctx["chosenHour"],
-        cost=cost,
-        prob=ctx["prob"],
-    )
-    """
+    _update_sync_token(channel_id, changes["nextSyncToken"])
 
-    # mark this invite as "handled" so you don't double-count
-    db.collection("InviteTracking").document(event_id).update(
-        {
-            "handled": True,
-            "responseStatus": resp,
-            "feedbackAt": datetime.now(TZ).isoformat(),
-        }
-    )
+    for ev in changes.get("items", []):
+        attendees = ev.get("attendees", [])
+        user_att = next(
+            (
+                a
+                for a in attendees
+                if a.get("self") or a["email"].endswith("@cornell.edu")
+            ),
+            None,
+        )
+        if not user_att:
+            continue
 
-    print("  ✅ Feedback processed successfully")
-    return ("", 200)
+        resp = user_att["responseStatus"]  # accepted | declined | …
+        if resp not in ("accepted", "declined"):
+            continue
+
+        # --- reward / log exactly like before --------------------------
+        track_doc = db.collection("InviteTracking").document(ev["id"]).get()
+        if not track_doc.exists:
+            continue
+        ctx = track_doc.to_dict()
+        if ctx.get("handled"):
+            continue
+
+        cost = 0.0 if resp == "accepted" else 1.0
+        vw_feedback(
+            task_type=ctx["taskType"],
+            task_duration=ctx["chunkDuration"],
+            hrs_until_due=ctx["hrsUntilDue"],
+            day_of_week=ctx["dayOfWeek"],
+            chosen_hour=ctx["chosenHour"],
+            cost=cost,
+            prob=ctx["prob"],
+        )
+
+        db.collection("InviteTracking").document(ev["id"]).update(
+            {
+                "handled": True,
+                "responseStatus": resp,
+                "feedbackAt": datetime.now(TZ).isoformat(),
+            }
+        )
+        print(f"✅ feedback for {ev['id']} → {resp}")
+
+    return ("", 204)
 
 
 @app.route("/api/generate-recs", methods=["POST"])
@@ -847,7 +873,7 @@ def generate_recommendations_endpoint():
 
 if __name__ == "__main__":
     # Start calendar watch for feedback
-    webhook_url = "https://your.ngrok.io/api/calendar-webhook"  # Replace with your actual webhook URL
+    webhook_url = "https://ff7c-199-79-156-50.ngrok-free.app/api/calendar-webhook"
     try:
         watch_resp = start_calendar_watch(get_timely_calendar_service(), webhook_url)
         print("✅ Calendar watch started:", watch_resp)

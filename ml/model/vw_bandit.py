@@ -108,6 +108,7 @@ def vw_feedback(
     """
     Record IPS feedback for ONE chosen hour (0 good → low cost).
     """
+    print("👀 RECORDING FEEDBACK")
     shared = f"shared |s {_ctx_hash(task_type, task_duration, hrs_until_due, day_of_week, 0)}"
     cb_line = f"{cost}:{chosen_hour}:{prob} |a hr={chosen_hour}"
 
@@ -121,10 +122,11 @@ def vw_feedback(
         print(f"Error in VW learning: {str(e)}")
         print(f"Example string: {example_str}")
 
+    print(
+        f"🔥 Feedback recorded: {task_type} {task_duration} {hrs_until_due} {day_of_week} {chosen_hour} {cost} {prob}"
+    )
+
 
 # ---------------------------------------------------------------- save model
 def save_model():
     vw.save(str(MODEL_PATH))
-
-
-# ---------------------------------------------------------------------------
