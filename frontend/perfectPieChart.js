@@ -149,10 +149,10 @@ async function loadGoals() {
     }
 }
 
-async function loadTasksAndRedraw() {
+async function loadTasksAndRedraw(passedGoals = null) {
     const svg = document.getElementById("perfectPie");
 
-    const response = await fetch(`http://localhost:8888/api/tasks?userId=TestALL`);
+    const response = await fetch(`http://localhost:8888/api/tasks?userId=${userId}`);
     const tasks = await response.json();
 
     let weeklyBreakup = { School: 0, Clubs: 0, Friends: 0, Hobbies: 0, Other: 0 };
@@ -177,19 +177,24 @@ async function loadTasksAndRedraw() {
         color: colorMap[label] || "#999"
     }));
 
-    // ⬇️ Fetch latest goals
-    const goalsRes = await fetch(`http://localhost:8888/api/goals?userId=${userId}`);
-    const { goals = {} } = await goalsRes.json();
+    let goalsToUse = passedGoals;
+    if (!passedGoals) {
+        // Fallback if no goals passed → fetch from backend
+        const goalsRes = await fetch(`http://localhost:8888/api/goals?userId=${userId}`);
+        const { goals = {} } = await goalsRes.json();
+        goalsToUse = goals;
+    }
 
-    drawPieChart(slices, svg, goals);
+    drawPieChart(slices, svg, goalsToUse || {});
 }
 
-    document.addEventListener("DOMContentLoaded", function () {
-        const svg = document.getElementById("perfectPie");
-        const breakdownButton = document.getElementById("showBreakdownForm");
-        const breakdownModal = document.getElementById("breakdownModal");
-        const closeBreakdownButton = document.querySelector(".close-breakdown");
-        const submitBreakdownButton = document.getElementById("submitBreakdown");
+
+document.addEventListener("DOMContentLoaded", function () {
+    const svg = document.getElementById("perfectPie");
+    const breakdownButton = document.getElementById("showBreakdownForm");
+    const breakdownModal = document.getElementById("breakdownModal");
+    const closeBreakdownButton = document.querySelector(".close-breakdown");
+    const submitBreakdownButton = document.getElementById("submitBreakdown");
 
     // First Draw
     loadGoals();
@@ -210,11 +215,11 @@ async function loadTasksAndRedraw() {
     // Modal control
     breakdownButton.addEventListener("click", async function () {
         breakdownModal.style.display = "block";
-    
+
         try {
             const res = await fetch(`http://localhost:8888/api/goals?userId=${userId}`);
             const data = await res.json();
-    
+
             if (data.goals) {
                 document.getElementById("schoolPercent").value = data.goals["School"] || "";
                 document.getElementById("clubsPercent").value = data.goals["Clubs"] || "";
@@ -226,7 +231,7 @@ async function loadTasksAndRedraw() {
             console.error("❌ Failed to load saved goals:", err);
         }
     });
-    
+
 
     closeBreakdownButton.addEventListener("click", function () {
         breakdownModal.style.display = "none";
@@ -240,7 +245,7 @@ async function loadTasksAndRedraw() {
 
     // Update slices
     submitBreakdownButton.addEventListener("click", async function () {
-    
+
         breakdownModal.style.display = "none";
         // Save to Firebase
         // Save to Firebase
@@ -270,5 +275,5 @@ async function loadTasksAndRedraw() {
         await loadTasksAndRedraw();
 
         breakdownModal.style.display = "none";
-    });    
+    });
 });

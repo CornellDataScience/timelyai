@@ -106,17 +106,78 @@ def get_timely_calendar_service():
     return build("calendar", "v3", credentials=creds)
 
 
-@app.route("/api/tasks", methods=["POST"])
-def add_task():
+@app.route("/api/tasks", methods=["POST", "PUT"])  # Allow POST and PUT
+def add_or_edit_task():
+    print("🚀 Incoming request to /api/tasks")
     data = request.get_json()
-    userId = data.get("userId")
+
+    user_id = data.get("userId")
     task = data.get("taskDetails")
+    task_id = data.get("taskId")
 
-    task_id = FB.addTask(
-        db, userId, task["title"], task["duration"], task["category"], task["dueDate"]
-    )
+    if not user_id or not task:
+        return (
+            jsonify({"status": "error", "message": "Missing userId or taskDetails"}),
+            400,
+        )
 
-    return jsonify({"status": "success", "message": "Task processed", "received": task})
+    try:
+        if task_id:
+            print(f"✏️ Updating task {task_id} for {user_id}")
+            success = FB.updateTask(
+                db,
+                user_id,
+                task_id,
+                task["title"],  # 🔄 match field names in your data
+                task["duration"],
+                task["category"],
+                task["dueDate"],
+            )
+            if success:
+                return jsonify({"status": "success", "message": "Task updated"})
+            else:
+                print("❌ Update failed — task ID not found.")
+                return jsonify({"status": "error", "message": "Task not found"}), 404
+        else:
+            print(f"➕ Adding new task for {user_id}")
+            new_task_id = FB.addTask(
+                db,
+                user_id,
+                task["title"],
+                task["duration"],
+                task["category"],
+                task["dueDate"],
+            )
+            return jsonify(
+                {"status": "success", "message": "Task added", "taskId": new_task_id}
+            )
+    except Exception as e:
+        print(f"❌ Error adding/editing task: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@app.route("/api/delete-task", methods=["DELETE"])
+def delete_task():
+    data = request.get_json()
+    user_id = data.get("userId")
+    task_id = data.get("taskId")
+
+    print(f"🗑️ Incoming DELETE: userId={user_id}, taskId={task_id}")
+
+    if not user_id or not task_id:
+        return jsonify({"status": "error", "message": "Missing userId or taskId"}), 400
+
+    try:
+        success = FB.deleteTask(db, user_id, task_id)
+        if success:
+            print(f"✅ Deleted task {task_id} for {user_id}")
+            return jsonify({"status": "success", "message": f"Task {task_id} deleted"})
+        else:
+            print(f"⚠️ Task {task_id} not found for {user_id}")
+            return jsonify({"status": "error", "message": "Task not found"}), 404
+    except Exception as e:
+        print(f"❌ Error deleting task: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 
 # @app.route('/api/tasks', methods=['POST'])
@@ -169,6 +230,7 @@ def get_tasks():
 
 @app.route("/api/goals", methods=["POST"])
 def save_goals():
+    print("🚀 Incoming POST to /api/goals")
     data = request.get_json()
     user_id = data.get("userId")
     goals = data.get("goals")
@@ -176,12 +238,15 @@ def save_goals():
     if not user_id or not goals:
         return jsonify({"status": "error", "message": "Missing userId or goals"}), 400
 
+    db = FB.initializeDB()
     doc_ref = db.collection("UserPreferences").document(user_id)
 
     try:
         doc_ref.set({"Goals": goals}, merge=True)
+        print(f"✅ Goals saved for user {user_id}")
         return jsonify({"status": "success", "message": "Goals saved"})
     except Exception as e:
+        print(f"❌ Error saving goals: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
 
@@ -192,16 +257,20 @@ def load_goals():
     if not user_id:
         return jsonify({"status": "error", "message": "Missing userId"}), 400
 
+    db = FB.initializeDB()
     doc_ref = db.collection("UserPreferences").document(user_id)
 
     try:
         doc = doc_ref.get()
         if not doc.exists:
+            print(f"⚠️ No goals found for user {user_id}")
             return jsonify({"goals": {}})
 
         goals = doc.to_dict().get("Goals", {})
+        print(f"✅ Loaded goals for {user_id}: {goals}")
         return jsonify({"goals": goals})
     except Exception as e:
+        print(f"❌ Error loading goals: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
 
@@ -459,68 +528,6 @@ def start_calendar_watch(timely_gcal, webhook_url):
     return watch
 
 
-# def send_invite_via_timely(
-#     timely_gcal,
-#     title,
-#     start_dt,
-#     dur,
-#     user_email,
-#     task_id,
-#     task_type,
-#     hrs_until_due,
-#     chosen_hour,
-#     prob,
-# ):
-#     """
-#     Insert the event on TimelyAI's calendar and e‑mail the invite.
-#     Returns htmlLink (string) or None.
-#     """
-#     if start_dt.tzinfo is None:
-#         start_dt = TZ.localize(start_dt)
-#     end_dt = start_dt + timedelta(hours=dur)
-
-#     body = {
-#         "summary": title,
-#         "description": f"TimelyAI scheduled task «{title}»",
-#         "start": {"dateTime": start_dt.isoformat()},
-#         "end": {"dateTime": end_dt.isoformat()},
-#         "attendees": [{"email": user_email}],
-#         "extendedProperties": {
-#             "private": {
-#                 "taskId": task_id,
-#                 "scheduledAt": datetime.now(TZ).isoformat(),
-#             }
-#         },
-#     }
-
-#     try:
-#         ev = (
-#             timely_gcal.events()
-#             .insert(calendarId="primary", body=body, sendUpdates="none")
-#             .execute()
-#         )
-
-#         # --- store model context for when the user responds ---
-#         db.collection("InviteTracking").document(ev["id"]).set(
-#             {
-#                 "taskId": task_id,
-#                 "taskType": task_type,
-#                 "chunkDuration": dur,
-#                 "hrsUntilDue": hrs_until_due,
-#                 "dayOfWeek": datetime.now(TZ).weekday(),
-#                 "chosenHour": chosen_hour,
-#                 "prob": prob,
-#                 "handled": False,
-#                 "createdAt": datetime.now(TZ).isoformat(),
-#             }
-#         )
-
-#         return ev.get("htmlLink"), ev.get("id")
-#     except Exception:
-#         traceback.print_exc()
-#         return None, None
-
-
 def send_invite_via_timely(
     timely_gcal,
     title,
@@ -611,51 +618,6 @@ def process_feedback_webhook():
             raise
 
     _update_sync_token(channel_id, changes["nextSyncToken"])
-
-    # for ev in changes.get("items", []):
-    #     attendees = ev.get("attendees", [])
-    #     user_att = next(
-    #         (
-    #             a
-    #             for a in attendees
-    #             if a.get("self") or a["email"].endswith("@cornell.edu")
-    #         ),
-    #         None,
-    #     )
-    #     if not user_att:
-    #         continue
-
-    #     resp = user_att["responseStatus"]  # accepted | declined | …
-    #     if resp not in ("accepted", "declined"):
-    #         continue
-
-    #     # --- reward / log exactly like before --------------------------
-    #     track_doc = db.collection("InviteTracking").document(ev["id"]).get()
-    #     if not track_doc.exists:
-    #         continue
-    #     ctx = track_doc.to_dict()
-    #     if ctx.get("handled"):
-    #         continue
-
-    #     cost = 0.0 if resp == "accepted" else 1.0
-    #     vw_feedback(
-    #         task_type=ctx["taskType"],
-    #         task_duration=ctx["chunkDuration"],
-    #         hrs_until_due=ctx["hrsUntilDue"],
-    #         day_of_week=ctx["dayOfWeek"],
-    #         chosen_hour=ctx["chosenHour"],
-    #         cost=cost,
-    #         prob=ctx["prob"],
-    #     )
-
-    #     db.collection("InviteTracking").document(ev["id"]).update(
-    #         {
-    #             "handled": True,
-    #             "responseStatus": resp,
-    #             "feedbackAt": datetime.now(TZ).isoformat(),
-    #         }
-    #     )
-    #     print(f"✅ feedback for {ev['id']} → {resp}")
 
     # return ("", 204)
     for ev in changes.get("items", []):
