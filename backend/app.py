@@ -29,7 +29,7 @@ from googleCalendarAPI.googleCalendarAPI import GoogleCalendar
 import atexit
 
 # Register model save on exit
-atexit.register(VW.save_model)
+atexit.register(VW.save_all_models)
 
 app = Flask(__name__)
 CORS(app)
@@ -689,7 +689,7 @@ def process_feedback_webhook():
             hrs_until_due=ctx["hrsUntilDue"],
             day_of_week=ctx["dayOfWeek"],
             chosen_hour=ctx["chosenHour"],
-            cost=(resp == "accepted"),
+            cost=(0.0 if resp == "accepted" else 1.0),
             prob=ctx["prob"],
         )
         db.collection("InviteTracking").document(ev["id"]).update(
@@ -845,7 +845,7 @@ def generate_recommendations_endpoint():
 
                 # Remove the hours we just used from the *free* list
                 used_range = range(
-                    offset_h, offset_h + math.ceil(dur)
+                    int(offset_h), int(offset_h) + math.ceil(dur)
                 )  # Round up to nearest hour
                 candidate_hours = [h for h in candidate_hours if h not in used_range]
 
@@ -964,7 +964,7 @@ def generate_recommendations_endpoint():
 
 if __name__ == "__main__":
     # Start calendar watch for feedback
-    webhook_url = "https://ff7c-199-79-156-50.ngrok-free.app/api/calendar-webhook"
+    webhook_url = "https://0d4f-199-79-156-50.ngrok-free.app/api/calendar-webhook"
     try:
         watch_resp = start_calendar_watch(get_timely_calendar_service(), webhook_url)
         print("✅ Calendar watch started:", watch_resp)
