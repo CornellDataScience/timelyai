@@ -128,6 +128,7 @@ def addTask(db, user_id, taskName, taskDuration, taskCategory, taskDeadline):
         task_id = db.collection("UserTasks").document().id  # This generates a random ID
 
     task_data = {
+        "id": task_id,
         "taskName": taskName,
         "taskDuration": taskDuration,
         "taskCategory": taskCategory,
@@ -143,10 +144,22 @@ def updateTask(
     db, user_id, task_id, taskName, taskDuration, taskCategory, taskDeadline
 ):
     """Modify an existing task."""
+    print(f"🛠 Attempting to update task: {task_id} for user {user_id}")
 
     doc_ref = db.collection("UserTasks").document(user_id)
     doc = doc_ref.get()
+
     if not doc.exists:
+        print("❌ User document does not exist.")
+        return False
+
+    user_data = doc.to_dict()
+    existing_tasks = user_data.get("tasks", {})
+
+    print("📋 Existing task IDs:", list(existing_tasks.keys()))
+
+    if task_id not in existing_tasks:
+        print(f"❌ Task ID '{task_id}' not found in Firestore.")
         return False
 
     task_data = {
@@ -156,51 +169,32 @@ def updateTask(
         "taskDeadline": taskDeadline
     }
 
-    user_data = doc.to_dict()  # Convert document snapshot to dictionary
-    existing_tasks = user_data.get(
-        "tasks", {}
-    )  # Get 'tasks' field or empty dict if it doesn't exist
-
-    if task_id not in existing_tasks:
-        print("Task ID doesn't exists.")
-        return False
-    else:
-        doc_ref.update({f"tasks.{task_id}": task_data})
+    print(f"✅ Updating task with data: {task_data}")
+    doc_ref.update({f"tasks.{task_id}": task_data})
     return True
 
 
+from google.cloud.firestore_v1 import DELETE_FIELD
+
 def deleteTask(db, user_id, task_id):
-    """
-    Delete a specific task for a user.
-
-    Args:
-        db: initialized firestore database
-        user_id (str): ID of the user
-        task_id (str): ID of the task to delete
-
-    Returns:
-        bool: True if successful, False if user not found or task doesn't exist
-    """
-
     doc_ref = db.collection("UserTasks").document(user_id)
     doc = doc_ref.get()
 
-    # Check if user exists
     if not doc.exists:
+        print("❌ User not found")
         return False
 
-    # Get user data
     user_data = doc.to_dict()
     tasks = user_data.get("tasks", {})
 
-    # Check if task exists
     if task_id not in tasks:
+        print(f"❌ Task {task_id} not found")
         return False
 
-    # Delete the task using the FieldValue.delete() method
-    doc_ref.update({f"tasks.{task_id}": firestore.DELETE_FIELD})
-
+    print(f"✅ Deleting task: {task_id}")
+    doc_ref.update({f"tasks.{task_id}": DELETE_FIELD})
     return True
+
 
 def updateGoals(db, user_id, goal_category, goal_name, duration):
     """Update user's goal duration."""

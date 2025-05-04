@@ -2,6 +2,8 @@ import { drawPieChart } from './perfectPieChart.js';
 console.log("Welcome to TimelyAI!");
 console.log("🔧 popup.js loaded");
 
+let currentEditingTaskId = null;
+
 document.addEventListener("DOMContentLoaded", function () {
     const taskList = document.getElementById("taskList");
     const addTaskButton = document.getElementById("showTaskForm");
@@ -29,30 +31,83 @@ document.addEventListener("DOMContentLoaded", function () {
             tasks.forEach(task => {
                 const emoji = getCategoryEmoji(task.category || "Other");
                 const li = document.createElement("li");
+            
                 if (!isNaN(task.duration) && task.duration.trim() !== "") {
-                    console.log("Duration of task "+ task.duration);
                     weeklyBreakup[task.category] = weeklyBreakup[task.category] + parseInt(task.duration);
                 }
-                
+            
                 li.innerHTML = `
-                    <strong>${emoji} ${task.title}</strong>
+                    <div class="top-row-todo-item">
+                        <strong class="todo-item-title">${emoji} ${task.title}</strong>
+                        <div class="todo-item-buttons">
+                            <button class="edit-task">✏️</button>
+                            <button class="delete-task">❌</button>
+                        </div>
+                    </div>
                     <span>Due: ${task.dueDate} | Duration: ${task.duration} | Category: ${task.category}</span>
                 `;
-                
-                li.style.cursor = "pointer"; 
-
-                // ✅ Add click listener to show modal
-                li.addEventListener("click", () => {
+            
+                li.style.cursor = "pointer";
+            
+                // ✅ View task details
+                li.querySelector(".todo-item-title").addEventListener("click", () => {
                     document.getElementById("taskModalTitle").textContent = task.title;
                     document.getElementById("taskModalDue").textContent = task.dueDate;
                     document.getElementById("taskModalDuration").textContent = task.duration;
                     document.getElementById("taskModalCategory").textContent = task.category;
-            
                     document.getElementById("taskDetailModal").style.display = "block";
                 });
+
+                function formatDateInput(dueDateString) {
+                    if (!dueDateString || dueDateString === "TBD") return "";
+                    const [month, day, year] = dueDateString.split("/");
+                    return `20${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+                }
+
+                li.querySelector(".edit-task").addEventListener("click", () => {
+                    document.getElementById("taskTitle").value = task.title;
+                    document.getElementById("taskDueDate").value = formatDateInput(task.dueDate);
+                    document.getElementById("taskDuration").value = task.duration;
+                    document.getElementById("taskCategory").value = task.category;
+
+                
+                    currentEditingTaskId = task.id;
+                    submitTaskButton.textContent = "Edit Task";
+                    modal.style.display = "block";
+                });                
+            
+                // ❌ DELETE button logic
+                li.querySelector(".delete-task").addEventListener("click", async () => {
+                    if (!task.id) {
+                        console.error("❌ Task is missing an ID, cannot delete.");
+                        return;
+                    }
+
+                    if (confirm(`Are you sure you want to delete "${task.title || "Untitled Task"}"?`)) {
+                        try {
+                            const res = await fetch("http://localhost:4000/api/tasks", {
+                                method: "DELETE",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({ userId, taskId: task.id })
+                            });
+                            
+                            const result = await res.json();
+
+                            if (result.status === "success") {
+                                console.log("✅ Task deleted:", result.message);
+                                loadTasks();  // 🔄 Refresh task list
+                            } else {
+                                console.error("❌ Delete failed:", result.message);
+                            }
+                        } catch (err) {
+                            console.error("❌ Error deleting task:", err);
+                        }
+                    }
+                });
+
             
                 taskList.appendChild(li);
-            });
+            });            
             console.log(weeklyBreakup);
 
             const svg = document.getElementById("perfectPie");
@@ -105,6 +160,11 @@ document.addEventListener("DOMContentLoaded", function () {
     window.addEventListener("click", (event) => {
         const modal = document.getElementById("taskDetailModal");
         if (event.target === modal) {
+            submitTaskButton.textContent = "Add Task";
+            document.getElementById("taskTitle").value = "";
+            document.getElementById("taskDueDate").value = "";
+            document.getElementById("taskDuration").value = "";
+            document.getElementById("taskCategory").value = "School";
             modal.style.display = "none";
         }
     });
@@ -114,7 +174,16 @@ document.addEventListener("DOMContentLoaded", function () {
     loadTasks();
 
     // 🎯 Modal logic
-    addTaskButton.addEventListener("click", () => modal.style.display = "block");
+    addTaskButton.addEventListener("click", () => {
+        submitTaskButton.textContent = "Add Task";
+        currentEditingTaskId = null;
+        document.getElementById("taskTitle").value = "";
+        document.getElementById("taskDueDate").value = "";
+        document.getElementById("taskDuration").value = "";
+        document.getElementById("taskCategory").value = "School";
+        modal.style.display = "block";
+    });
+    
     closeButton.addEventListener("click", () => modal.style.display = "none");
     window.addEventListener("click", event => {
         if (event.target === modal) modal.style.display = "none";
@@ -126,38 +195,53 @@ document.addEventListener("DOMContentLoaded", function () {
         let dueDate = document.getElementById("taskDueDate").value;
         let duration = document.getElementById("taskDuration").value.trim() || "TBD";
         let category = document.getElementById("taskCategory").value.trim() || "None";
-
+    
         if (dueDate) {
             const [year, month, day] = dueDate.split("-");
             dueDate = `${parseInt(month)}/${parseInt(day)}/${year.slice(-2)}`;
         } else {
             dueDate = "TBD";
         }
+    
+        const taskDetails = {
+            taskName: title,
+            taskDeadline: dueDate,
+            taskDuration: duration,
+            taskCategory: category
+        };
 
-        const taskDetails = { title, dueDate, duration, category };
+        const payload = {
+            userId,
+            taskDetails,
+            ...(currentEditingTaskId && { taskId: currentEditingTaskId })  // ✅ attaches taskId for PUT
+        };
 
-        fetch('http://localhost:8888/api/tasks', {
-            method: 'POST',
+        console.log("🧪 Payload being sent:", payload);
+
+        fetch('http://localhost:4000/api/tasks', {
+            method: 'POST',  // ✅ Always POST
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ userId, taskDetails })
+            body: JSON.stringify(payload)
         })
         .then(res => res.json())
         .then(data => {
-            console.log('✅ Task added:', data);
-            loadTasks(); // 🔄 Refresh task list
-            console.log('TASKS LOADED!');
+            console.log(`✅ Task ${currentEditingTaskId ? "edited" : "added"}:`, data);
+            loadTasks();
         })
         .catch(error => {
-            console.error('❌ Error sending task:', error);
-        });
-
-        // Reset modal form and close
+            console.error('❌ Error submitting task:', error);
+        });        
+    
+        // 🔄 Reset everything
         modal.style.display = "none";
+        currentEditingTaskId = null;
+        submitTaskButton.textContent = "Add Task";
         document.getElementById("taskTitle").value = "";
         document.getElementById("taskDueDate").value = "";
         document.getElementById("taskDuration").value = "";
         document.getElementById("taskCategory").value = "School";
     });
+    
 
     // 📅 Simple event creation alert
     document.getElementById("createEvent").addEventListener("click", function () {

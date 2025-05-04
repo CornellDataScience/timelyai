@@ -64,25 +64,55 @@ import json
 app = Flask(__name__)
 CORS(app)
 
+@app.route('/api/tasks', methods=['POST', 'PUT'])  # Accept both POST and PUT
+def add_or_edit_task():
+    print("🚀 Incoming request to /api/tasks")
 
-@app.route('/api/tasks', methods=['POST'])
-def add_task():
-    print("🚀 Incoming POST to /api/tasks")
     data = request.get_json()
-    userId = data.get('userId')
-    task = data.get('taskDetails')
-   
-    print(f"✅ Task received from {userId}: {task}")
+    print("📦 Incoming JSON payload:")
+    print(data)
+    print("🔎 taskId:", data.get("taskId"))
+
+    user_id = data.get("userId")
+    task = data.get("taskDetails")
+    task_id = data.get("taskId")  # ✅ FIXED: use the correct key
 
     db = FB.initializeDB()
-    task_id = FB.addTask(db,userId,task["title"], task["duration"], task["category"],task["dueDate"])
-    print(f"✅ Task added to {userId}: {task_id}")
-    # You can now do something with the task here, like:
-    # - Save to DB
-    # - Run your optimizer
-    # - Respond with a suggested schedule
 
-    return jsonify({'status': 'success', 'message': 'Task processed', 'received': task})
+    if not user_id or not task:
+        return jsonify({"status": "error", "message": "Missing user or task data"}), 400
+
+    try:
+        if task_id:
+            print(f"✏️ Updating task {task_id} for {user_id}")
+            success = FB.updateTask(
+                db,
+                user_id,
+                task_id,
+                task["taskName"],
+                task["taskDuration"],
+                task["taskCategory"],
+                task["taskDeadline"]
+            )
+            if success:
+                return jsonify({"status": "success", "message": "Task updated"})
+            else:
+                print("❌ Update failed — task ID not found in Firestore.")
+                return jsonify({"status": "error", "message": "Task not found"}), 404
+        else:
+            print(f"➕ Adding task for {user_id}")
+            new_task_id = FB.addTask(
+                db,
+                user_id,
+                task["taskName"],
+                task["taskDuration"],
+                task["taskCategory"],
+                task["taskDeadline"]
+            )
+            return jsonify({"status": "success", "message": "Task added", "taskId": new_task_id})
+    except Exception as e:
+        print(f"❌ Error processing task: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 
 # @app.route('/api/tasks', methods=['POST'])
@@ -197,6 +227,27 @@ def generate_recommendations():
         print(f"❌ Error generating recommendations: {e}")
         return jsonify({ "status": "error", "message": str(e) }), 500
 
+@app.route('/api/delete-task', methods=['DELETE'])
+def delete_task_route():
+    data = request.get_json()
+    user_id = data.get("userId")
+    task_id = data.get("taskId")
+
+    print(f"➡️ Received delete request: userId={user_id}, taskId={task_id}")
+
+    db = FB.initializeDB()
+    if not user_id or not task_id:
+        return jsonify({"status": "error", "message": "Missing userId or taskId"}), 400
+
+    try:
+        success = FB.deleteTask(db, user_id, task_id)
+        if success:
+            return jsonify({"status": "success", "message": f"Task {task_id} deleted"})
+        else:
+            return jsonify({"status": "error", "message": "Task not found"}), 404
+    except Exception as e:
+        print(f"❌ Error deleting task: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 if __name__ == '__main__':
     app.run(port=8888)
