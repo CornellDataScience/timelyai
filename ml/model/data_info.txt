@@ -33,13 +33,12 @@ For prediction examples (no feedback):
 Each example includes the following features:
 
 1. `event_type` - Type of task (e.g., "hw", "meeting", "reading", "project")
-2. `category_X` - Category feature (e.g., "category_school", "category_social")
-3. `task_duration` - Expected duration in hours
-4. `hours_until_due` - Hours until the task is due
-5. `daily_free_time` - Available free time in the day
-6. `day_of_week` - Day of the week (0=Monday, 6=Sunday)
-7. `is_weekend` - Binary indicator if the day is a weekend (1) or weekday (0)
-8. `time_of_day` - Current time of day in 24-hour format with decimal hours
+2. `task_duration` - Expected duration in hours
+3. `hours_until_due` - Hours until the task is due
+4. `daily_free_time` - Available free time in the day
+5. `day_of_week` - Day of the week (0=Monday, 6=Sunday)
+6. `is_weekend` - Binary indicator if the day is a weekend (1) or weekday (0)
+7. `time_of_day` - Current time of day in 24-hour format with decimal hours
 
 ## Event Categories
 
