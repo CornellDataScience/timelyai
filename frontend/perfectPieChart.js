@@ -1,3 +1,5 @@
+const userId = localStorage.getItem("userId");
+
 function polarToCartesian(cx, cy, r, angleDeg) {
     const rad = (angleDeg - 90) * Math.PI / 180;
     return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
@@ -119,7 +121,7 @@ export function drawPieChart(sliceData, svg, savedGoals = {}) {
 
 async function loadGoals() {
     try {
-        const res = await fetch("http://localhost:8888/api/goals?userId=TestALL");
+        const res = await fetch(`http://localhost:8888/api/goals?userId=${userId}`);
         const data = await res.json();
 
         if (data.goals && typeof data.goals === 'object') {
@@ -176,18 +178,18 @@ async function loadTasksAndRedraw() {
     }));
 
     // ⬇️ Fetch latest goals
-    const goalsRes = await fetch("http://localhost:8888/api/goals?userId=TestALL");
+    const goalsRes = await fetch(`http://localhost:8888/api/goals?userId=${userId}`);
     const { goals = {} } = await goalsRes.json();
 
     drawPieChart(slices, svg, goals);
 }
 
-document.addEventListener("DOMContentLoaded", function () {
-    const svg = document.getElementById("perfectPie");
-    const breakdownButton = document.getElementById("showBreakdownForm");
-    const breakdownModal = document.getElementById("breakdownModal");
-    const closeBreakdownButton = document.querySelector(".close-breakdown");
-    const submitBreakdownButton = document.getElementById("submitBreakdown");
+    document.addEventListener("DOMContentLoaded", function () {
+        const svg = document.getElementById("perfectPie");
+        const breakdownButton = document.getElementById("showBreakdownForm");
+        const breakdownModal = document.getElementById("breakdownModal");
+        const closeBreakdownButton = document.querySelector(".close-breakdown");
+        const submitBreakdownButton = document.getElementById("submitBreakdown");
 
     // First Draw
     loadGoals();
@@ -210,7 +212,7 @@ document.addEventListener("DOMContentLoaded", function () {
         breakdownModal.style.display = "block";
     
         try {
-            const res = await fetch("http://localhost:8888/api/goals?userId=TestALL");
+            const res = await fetch(`http://localhost:8888/api/goals?userId=${userId}`);
             const data = await res.json();
     
             if (data.goals) {
@@ -255,7 +257,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                    userId: "TestALL",
+                    userId: userId,
                     goals: goals
                 })
             });
