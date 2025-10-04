@@ -2,7 +2,7 @@
 
 ## Purpose
 
-TimelyAI is a web application that connects to Google Calendar to turn goals and constraints into a realistic, time‑boxed weekly plan. It schedules focused work blocks, respects quiet hours and existing events, and keeps your calendar as the single source of truth.
+TimelyAI is a web application that connects to Google Calendar to turn goals and constraints into a realistic, time‑boxed weekly plan. It schedules focused work blocks, respects quiet hours and existing events, and allows for easy integration of daily tasks into a single well-organized calendar.
 
 ## Implementation
 
